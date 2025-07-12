@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+Qobuz_Downloads/
+bot.log
+venv/
