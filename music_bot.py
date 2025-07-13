@@ -1,53 +1,98 @@
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import subprocess
 import os
+import subprocess
 import glob
+import shutil
+import logging
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+)
 
-# Путь до твоего виртуального окружения
+# 🔧 Настройки
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Установи переменную окружения в systemd или .env
 VENV_PYTHON = "/opt/qobuz-env/bin/python"
 QOBUZ_DL = "/opt/qobuz-env/bin/qobuz-dl"
 DOWNLOAD_DIR = os.path.expanduser("~/Qobuz Downloads")
 
-async def download_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# 🎯 Логирование
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+
+# 👋 /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🎧 KuzyMusicBot запущен!\nПросто отправь /download <ссылка на Qobuz трек>")
+
+
+# ⬇️ /download
+async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("🎵 Пришли ссылку на трек, например:\n/download https://open.qobuz.com/track/118882834")
+        await update.message.reply_text("❌ Укажи ссылку на трек Qobuz после команды.")
         return
 
     url = context.args[0]
-    await update.message.reply_text("⏬ Начинаю загрузку трека... Приготовь уши 👂🔥")
+    await update.message.reply_text(f"⬇️ Начинаю загрузку трека:\n{url}")
 
     try:
-        # Запуск загрузки трека
-        subprocess.run([QOBUZ_DL, "dl", url], check=True)
+        # 🧹 Очистка старой папки
+        if os.path.exists(DOWNLOAD_DIR):
+            shutil.rmtree(DOWNLOAD_DIR)
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-        # Поиск загруженного файла
-        audio_files = glob.glob(os.path.join(DOWNLOAD_DIR, "**", "*.flac"), recursive=True)
-        cover_files = glob.glob(os.path.join(DOWNLOAD_DIR, "**", "cover.jpg"), recursive=True)
+        # 🚀 Запуск загрузки
+        result = subprocess.run(
+            [QOBUZ_DL, "dl", url],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        logger.info("Загрузка завершена:\n" + result.stdout)
 
-        if not audio_files:
-            await update.message.reply_text("⚠️ Не удалось найти аудиофайл после загрузки.")
+        # 🔍 Поиск файлов
+        flac_files = glob.glob(os.path.join(DOWNLOAD_DIR, "**/*.flac"), recursive=True)
+        cover_files = glob.glob(os.path.join(DOWNLOAD_DIR, "**/cover.jpg"), recursive=True)
+
+        if not flac_files:
+            await update.message.reply_text("😢 Трек не найден после загрузки.")
             return
 
-        # Отправка аудиофайла
-        audio_path = audio_files[0]
-        await context.bot.send_audio(chat_id=update.effective_chat.id, audio=open(audio_path, 'rb'))
+        # 🎵 Отправка аудио
+        flac_path = flac_files[0]
+        with open(flac_path, "rb") as audio_file:
+            await update.message.reply_audio(audio=audio_file, title="🎶 Твоя загрузка с Qobuz")
 
-        # Отправка обложки (если найдена)
+        # 🖼 Отправка обложки
         if cover_files:
-            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=open(cover_files[0], 'rb'))
+            with open(cover_files[0], "rb") as cover:
+                await update.message.reply_photo(photo=cover, caption="📀 Обложка альбома")
 
-        # Удаление всех файлов
-        for file_path in audio_files + cover_files:
-            os.remove(file_path)
+        # 🧹 Удаление
+        shutil.rmtree(DOWNLOAD_DIR)
+        logger.info("Удалены временные файлы")
 
     except subprocess.CalledProcessError as e:
+        logger.error("Ошибка загрузки:\n" + e.stderr)
         await update.message.reply_text("❌ Ошибка при загрузке трека.")
-        print(f"[ERROR] Qobuz download error: {e}")
+    except Exception as e:
+        logger.error("Непредвиденная ошибка:\n" + str(e))
+        await update.message.reply_text("⚠️ Что-то пошло не так.")
 
-# Регистрируем команду
-app = ApplicationBuilder().token("ТВОЙ_ТОКЕН").build()
-app.add_handler(CommandHandler("download", download_handler))
+
+# 🚀 Запуск
+def main():
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("download", handle_download))
+
+    logger.info("KuzyMusicBot запущен")
+    application.run_polling()
+
 
 if __name__ == "__main__":
-    app.run_polling()
+    main()
