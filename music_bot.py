@@ -1,148 +1,110 @@
 import os
-import shlex
-import asyncio
 import logging
-import datetime
-import subprocess
+import asyncio
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
+from subprocess import Popen, PIPE
+from uuid import uuid4
+from threading import Lock
 
-# Загрузка переменных окружения
+# Загрузка .env
 load_dotenv()
-
-# Параметры
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-DOWNLOAD_DIR = os.path.expanduser("~/musicBot/Qobuz/Downloads")
+
+# Пути
 VENV_PYTHON = "/opt/qobuz-env/bin/python"
 QOBUZ_DL = "/opt/qobuz-env/bin/qobuz-dl"
+DOWNLOAD_DIR = "/root/musicBot/Qobuz/Downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Очередь задач
-download_queue = asyncio.Queue()
-
-# Настройка логгера
+# Логирование
 logging.basicConfig(
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Прогресс-бар
-def create_progress_bar(percent):
-    total_blocks = 10
-    filled_blocks = int(percent / (100 / total_blocks))
-    bar = "█" * filled_blocks + "░" * (total_blocks - filled_blocks)
-    return f"[{bar}]"
-
-# Отправка трека пользователю
-async def send_track(update: Update, release_id: str):
-    folder = os.path.join(DOWNLOAD_DIR, os.listdir(DOWNLOAD_DIR)[0])  # берём первую папку
-    logger.info(f"Ищем трек в папке: {folder}")
-
-    for filename in os.listdir(folder):
-        if filename.lower().endswith(".flac") or filename.lower().endswith(".mp3"):
-            filepath = os.path.join(folder, filename)
-            cover_path = os.path.join(folder, "cover.jpg")
-
-            # Отправка файла
-            with open(filepath, "rb") as audio_file:
-                if os.path.exists(cover_path):
-                    with open(cover_path, "rb") as thumb:
-                        await update.message.reply_audio(audio=audio_file, thumbnail=thumb)
-                else:
-                    await update.message.reply_audio(audio=audio_file)
-
-            logger.info(f"Отправлен файл: {filepath}")
-
-            # Удаление папки
-            subprocess.run(["rm", "-rf", folder])
-            logger.info("Удалена папка после отправки")
-
-            break
-
-# Очередь загрузки
-async def download_worker():
-    while True:
-        link, update = await download_queue.get()
-        try:
-            release_id = link.strip().split("/")[-1]
-            cmd = f"{QOBUZ_DL} dl --no-db {shlex.quote(link)}"
-            logger.info(f"Запуск команды: {cmd}")
-
-            progress_msg = await update.message.reply_text("⏳ Загрузка началась...\n[░░░░░░░░░░] 0%")
-
-            process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=DOWNLOAD_DIR
-            )
-
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
-                decoded = line.decode().strip()
-                logger.info(decoded)
-
-                if "%" in decoded:
-                    try:
-                        percent_str = decoded.split()[-1].replace("%", "")
-                        percent = int(float(percent_str))
-                        bar = create_progress_bar(percent)
-                        await progress_msg.edit_text(f"⬇️ Загрузка...\n{bar} {percent}%")
-                    except Exception as e:
-                        logger.warning(f"Не удалось распарсить строку: {decoded} — {e}")
-
-            stdout, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                await update.message.reply_text(f"❌ Ошибка загрузки:\n{stderr.decode()}")
-                logger.error(stderr.decode())
-            else:
-                logger.info("Загрузка завершена")
-                await progress_msg.edit_text("✅ Загрузка завершена!")
-                await send_track(update, release_id)
-
-        except Exception as e:
-            logger.error(f"Ошибка при скачивании: {e}")
-            await update.message.reply_text("❌ Произошла ошибка при загрузке трека.")
-        finally:
-            download_queue.task_done()
+# Очередь загрузок
+download_queue = asyncio.Queue()
+download_lock = Lock()
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Отправь /download, а потом ссылку на трек Qobuz 🎧")
+    await update.message.reply_text("🎵 Привет! Отправь ссылку на трек Qobuz после команды /download")
 
-# Команда /download
+# Обработка команды /download
 async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎵 Жду ссылку на трек Qobuz...")
+    await update.message.reply_text("📎 Отправь ссылку на трек Qobuz одним сообщением")
+    return
 
-# Обработка сообщений
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "qobuz.com/track/" in update.message.text:
-        await download_queue.put((update.message.text.strip(), update))
-        await update.message.reply_text("🛰 Добавлено в очередь на загрузку...")
+# Обработка ссылки
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if "qobuz.com/track/" in text:
+        await download_queue.put((update, context, text))
+        await update.message.reply_text("⏳ Трек добавлен в очередь загрузки... 🌀")
     else:
-        await update.message.reply_text("Пожалуйста, пришли ссылку на трек Qobuz 🎶")
+        await update.message.reply_text("❌ Это не ссылка на трек Qobuz!")
 
-# Запуск бота
-async def main():
+# Воркер загрузки
+async def download_worker():
+    while True:
+        update, context, url = await download_queue.get()
+        chat_id = update.effective_chat.id
+
+        try:
+            temp_id = uuid4().hex
+            logger.info(f"🔻 Начинаем загрузку: {url}")
+            await context.bot.send_message(chat_id, f"🚀 Начинаю загрузку трека по ссылке:\n{url}")
+
+            # Команда загрузки
+            command = [QOBUZ_DL, "dl", url, "--no-db"]
+            process = Popen(command, stdout=PIPE, stderr=PIPE, cwd=DOWNLOAD_DIR)
+            stdout, stderr = process.communicate()
+
+            logger.info(stdout.decode())
+            if stderr:
+                logger.error(stderr.decode())
+
+            # Поиск загруженного файла
+            downloaded_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith(".flac") or f.endswith(".mp3")]
+            if not downloaded_files:
+                await context.bot.send_message(chat_id, "❌ Не удалось найти загруженный файл.")
+                continue
+
+            track_file = os.path.join(DOWNLOAD_DIR, downloaded_files[0])
+            cover_file = os.path.join(DOWNLOAD_DIR, "cover.jpg") if os.path.exists(os.path.join(DOWNLOAD_DIR, "cover.jpg")) else None
+
+            # Отправка файла
+            await context.bot.send_audio(chat_id=chat_id, audio=open(track_file, "rb"))
+            if cover_file:
+                await context.bot.send_photo(chat_id=chat_id, photo=open(cover_file, "rb"))
+
+            # Удаление файлов
+            os.remove(track_file)
+            if cover_file:
+                os.remove(cover_file)
+
+            await context.bot.send_message(chat_id, "✅ Готово! Трек отправлен и удалён с сервера.")
+
+        except Exception as e:
+            logger.exception("❗ Ошибка при загрузке трека")
+            await context.bot.send_message(chat_id, f"❗ Ошибка при загрузке: {str(e)}")
+
+        finally:
+            download_queue.task_done()
+
+# Запуск
+if __name__ == "__main__":
     logger.info("🚀 KuzyMusicBot запускается...")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("download", download_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("download", download_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-
-    asyncio.create_task(download_worker())
-
-    logger.info(f"🤖 KuzyMusicBot запущен в {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    await app.run_polling()
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logger.error(f"❗ Ошибка: {e}")
+    loop = asyncio.get_event_loop()
+    loop.create_task(download_worker())
+    logger.info("🤖 KuzyMusicBot запущен")
+    application.run_polling()
