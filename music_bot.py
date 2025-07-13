@@ -1,98 +1,116 @@
 import os
-import subprocess
 import glob
-import shutil
 import logging
+import subprocess
+import asyncio
+from datetime import datetime
+from queue import Queue
+
 from telegram import Update
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
+    Application, CommandHandler, MessageHandler, filters,
+    ContextTypes, ConversationHandler
 )
 
-# 🔧 Настройки
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Установи переменную окружения в systemd или .env
-VENV_PYTHON = "/opt/qobuz-env/bin/python"
+from dotenv import load_dotenv
+load_dotenv()
+
+# Переменные
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 QOBUZ_DL = "/opt/qobuz-env/bin/qobuz-dl"
 DOWNLOAD_DIR = os.path.expanduser("~/Qobuz Downloads")
 
-# 🎯 Логирование
+WAIT_FOR_LINK = range(1)
+download_queue = Queue()
+downloading = False
+
+# Логирование
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-
-# 👋 /start
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎧 KuzyMusicBot запущен!\nПросто отправь /download <ссылка на Qobuz трек>")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    await update.message.reply_text(f"🤖 KuzyMusicBot запущен\n🕒 {now}")
 
+# /download
+async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⚠️ Укажи ссылку на трек. Пример:\nhttps://open.qobuz.com/track/12345")
+    return WAIT_FOR_LINK
 
-# ⬇️ /download
-async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("❌ Укажи ссылку на трек Qobuz после команды.")
+# Обработка ссылки
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    link = update.message.text.strip()
+    chat_id = update.effective_chat.id
+
+    if not link.startswith("https://open.qobuz.com/track/"):
+        await context.bot.send_message(chat_id=chat_id, text="❌ Неверная ссылка. Попробуй ещё раз.")
+        return WAIT_FOR_LINK
+
+    download_queue.put((chat_id, link))
+    await context.bot.send_message(chat_id=chat_id, text="📥 Трек добавлен в очередь на загрузку.")
+    asyncio.create_task(process_queue(context))
+    return ConversationHandler.END
+
+# Загрузка
+async def process_queue(context: ContextTypes.DEFAULT_TYPE):
+    global downloading
+    if downloading or download_queue.empty():
         return
+    downloading = True
 
-    url = context.args[0]
-    await update.message.reply_text(f"⬇️ Начинаю загрузку трека:\n{url}")
+    while not download_queue.empty():
+        chat_id, link = download_queue.get()
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=f"⬇️ Начинаю загрузку трека:\n{link}")
+            logger.info(f"Загружаем {link}...")
 
-    try:
-        # 🧹 Очистка старой папки
-        if os.path.exists(DOWNLOAD_DIR):
-            shutil.rmtree(DOWNLOAD_DIR)
-        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            subprocess.run([QOBUZ_DL, "dl", "--no-db", link], check=True)
 
-        # 🚀 Запуск загрузки
-        result = subprocess.run(
-            [QOBUZ_DL, "dl", url],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        logger.info("Загрузка завершена:\n" + result.stdout)
+            flacs = glob.glob(f"{DOWNLOAD_DIR}/**/*.flac", recursive=True)
+            if not flacs:
+                await context.bot.send_message(chat_id=chat_id, text="❌ Не найден файл .flac")
+                continue
 
-        # 🔍 Поиск файлов
-        flac_files = glob.glob(os.path.join(DOWNLOAD_DIR, "**/*.flac"), recursive=True)
-        cover_files = glob.glob(os.path.join(DOWNLOAD_DIR, "**/cover.jpg"), recursive=True)
+            audio = flacs[0]
+            cover = os.path.join(os.path.dirname(audio), "cover.jpg")
 
-        if not flac_files:
-            await update.message.reply_text("😢 Трек не найден после загрузки.")
-            return
+            with open(audio, "rb") as f:
+                await context.bot.send_audio(chat_id=chat_id, audio=f)
 
-        # 🎵 Отправка аудио
-        flac_path = flac_files[0]
-        with open(flac_path, "rb") as audio_file:
-            await update.message.reply_audio(audio=audio_file, title="🎶 Твоя загрузка с Qobuz")
+            if os.path.exists(cover):
+                with open(cover, "rb") as f:
+                    await context.bot.send_photo(chat_id=chat_id, photo=f)
 
-        # 🖼 Отправка обложки
-        if cover_files:
-            with open(cover_files[0], "rb") as cover:
-                await update.message.reply_photo(photo=cover, caption="📀 Обложка альбома")
+            os.remove(audio)
+            if os.path.exists(cover):
+                os.remove(cover)
 
-        # 🧹 Удаление
-        shutil.rmtree(DOWNLOAD_DIR)
-        logger.info("Удалены временные файлы")
+            logger.info(f"✅ Отправлен и удалён: {audio}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при загрузке: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Ошибка при загрузке:\n{e}")
 
-    except subprocess.CalledProcessError as e:
-        logger.error("Ошибка загрузки:\n" + e.stderr)
-        await update.message.reply_text("❌ Ошибка при загрузке трека.")
-    except Exception as e:
-        logger.error("Непредвиденная ошибка:\n" + str(e))
-        await update.message.reply_text("⚠️ Что-то пошло не так.")
+    downloading = False
 
-
-# 🚀 Запуск
+# Запуск
 def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("download", handle_download))
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("download", download_command)],
+        states={WAIT_FOR_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link)]},
+        fallbacks=[],
+    )
 
-    logger.info("KuzyMusicBot запущен")
-    application.run_polling()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(conv)
 
+    logger.info("🚀 KuzyMusicBot запускается...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
