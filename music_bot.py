@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Параметры
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 DOWNLOAD_DIR = os.path.expanduser("~/musicBot/Qobuz/Downloads")
 VENV_PYTHON = "/opt/qobuz-env/bin/python"
 QOBUZ_DL = "/opt/qobuz-env/bin/qobuz-dl"
