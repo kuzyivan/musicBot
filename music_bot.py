@@ -46,6 +46,17 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Это не ссылка на трек Qobuz!")
 
+# Рекурсивный поиск аудиофайлов
+def find_audio_files(directory):
+    found_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith((".flac", ".mp3")):
+                full_path = os.path.join(root, file)
+                logger.info(f"🔍 Найден файл: {full_path}")
+                found_files.append(full_path)
+    return found_files
+
 # Воркер загрузки
 async def download_worker():
     while True:
@@ -53,12 +64,17 @@ async def download_worker():
         chat_id = update.effective_chat.id
 
         try:
+            temp_id = uuid4().hex
             logger.info(f"🔻 Начинаем загрузку: {url}")
             await context.bot.send_message(chat_id, f"🚀 Начинаю загрузку трека:\n{url}")
 
-            # Запуск qobuz-dl
-            command = [QOBUZ_DL, "dl", url, "--no-db"]
-            process = Popen(command, stdout=PIPE, stderr=PIPE, cwd=DOWNLOAD_DIR)
+            # Команда загрузки с указанием пути
+            command = [
+                QOBUZ_DL, "dl", url,
+                "--no-db",
+                "--output", DOWNLOAD_DIR
+            ]
+            process = Popen(command, stdout=PIPE, stderr=PIPE)
             stdout, stderr = process.communicate()
 
             stdout_decoded = stdout.decode().strip()
@@ -69,30 +85,18 @@ async def download_worker():
             if stderr_decoded:
                 if "Error" in stderr_decoded or "Exception" in stderr_decoded:
                     logger.error(stderr_decoded)
-                    await context.bot.send_message(chat_id, f"❌ Ошибка при загрузке:\n{stderr_decoded}")
-                    continue
                 else:
                     logger.info(stderr_decoded)
 
-            # Проверка успешности по фразе "Completed"
-            if "Completed" not in stdout_decoded:
+            # Поиск аудиофайлов
+            downloaded_files = find_audio_files(DOWNLOAD_DIR)
+            if not downloaded_files:
                 await context.bot.send_message(chat_id, "❌ Загрузка не завершилась корректно.")
                 continue
 
-            # Ждём появления загруженного файла (до 10 сек, проверка каждые 0.5 сек)
-            track_file = None
-            for _ in range(20):
-                files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith(".flac") or f.endswith(".mp3")]
-                if files:
-                    track_file = os.path.join(DOWNLOAD_DIR, files[0])
-                    break
-                await asyncio.sleep(0.5)
-
-            if not track_file or not os.path.exists(track_file):
-                await context.bot.send_message(chat_id, "❌ Не удалось найти загруженный файл.")
-                continue
-
-            cover_file = os.path.join(DOWNLOAD_DIR, "cover.jpg") if os.path.exists(os.path.join(DOWNLOAD_DIR, "cover.jpg")) else None
+            track_file = downloaded_files[0]
+            cover_file = os.path.join(os.path.dirname(track_file), "cover.jpg")
+            cover_file = cover_file if os.path.exists(cover_file) else None
 
             # Отправка
             await context.bot.send_audio(chat_id=chat_id, audio=open(track_file, "rb"))
@@ -122,7 +126,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("download", download_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
 
-    # Воркер нужно запускать асинхронно
+    # Запуск воркера
     async def on_startup(app):
         asyncio.create_task(download_worker())
         logger.info("🤖 KuzyMusicBot запущен и готов к работе")
