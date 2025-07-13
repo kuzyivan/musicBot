@@ -68,7 +68,7 @@ async def download_worker():
             logger.info(f"🔻 Начинаем загрузку: {url}")
             await context.bot.send_message(chat_id, f"🚀 Начинаю загрузку трека:\n{url}")
 
-            # Команда загрузки с указанием пути
+            # Команда загрузки
             command = [
                 QOBUZ_DL, "dl", url,
                 "--no-db",
@@ -98,8 +98,17 @@ async def download_worker():
             cover_file = os.path.join(os.path.dirname(track_file), "cover.jpg")
             cover_file = cover_file if os.path.exists(cover_file) else None
 
-            # Отправка
-            await context.bot.send_audio(chat_id=chat_id, audio=open(track_file, "rb"))
+            # Проверка размера
+            file_size = os.path.getsize(track_file)
+            size_mb = round(file_size / 1024 / 1024, 2)
+
+            if file_size <= 50 * 1024 * 1024:
+                logger.info(f"📤 Отправка трека как audio ({size_mb} MB)")
+                await context.bot.send_audio(chat_id=chat_id, audio=open(track_file, "rb"))
+            else:
+                logger.info(f"📤 Отправка трека как document ({size_mb} MB)")
+                await context.bot.send_document(chat_id=chat_id, document=open(track_file, "rb"), filename=os.path.basename(track_file))
+
             if cover_file:
                 await context.bot.send_photo(chat_id=chat_id, photo=open(cover_file, "rb"))
 
@@ -126,7 +135,6 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("download", download_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
 
-    # Запуск воркера
     async def on_startup(app):
         asyncio.create_task(download_worker())
         logger.info("🤖 KuzyMusicBot запущен и готов к работе")
