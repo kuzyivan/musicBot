@@ -102,7 +102,7 @@ async def download_worker():
             download_queue.task_done()
 
 # Основной запуск
-async def main():
+if __name__ == "__main__":
     logger.info("🚀 KuzyMusicBot запускается...")
 
     application = Application.builder().token(BOT_TOKEN).build()
@@ -110,11 +110,10 @@ async def main():
     application.add_handler(CommandHandler("download", download_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
 
-    # Старт воркера
-    asyncio.create_task(download_worker())
+    # Воркер нужно запускать асинхронно внутри PTB
+    async def on_startup(app):
+        asyncio.create_task(download_worker())
+        logger.info("🤖 KuzyMusicBot запущен и готов к работе")
 
-    logger.info("🤖 KuzyMusicBot запущен и готов к работе")
-    await application.run_polling()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    application.post_init = on_startup
+    application.run_polling()
