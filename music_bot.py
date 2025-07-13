@@ -72,7 +72,7 @@ async def download_worker():
             command = [
                 QOBUZ_DL, "dl", url,
                 "--no-db",
-                "--output", DOWNLOAD_DIR
+                "--quality", "6"
             ]
             process = Popen(command, stdout=PIPE, stderr=PIPE)
             stdout, stderr = process.communicate()
