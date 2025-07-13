@@ -8,8 +8,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 📥 Checkout repo
+      - name: 📥 Checkout code
         uses: actions/checkout@v3
 
       - name: 🚀 Deploy via SSH
@@ -19,6 +20,20 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            echo "📁 Переходим в директорию проекта"
             cd ~/musicBot
+
+            echo "🔄 Обновляем репозиторий"
             git pull origin main
-            systemctl restart musicbot.service || echo "Сервис пока не настроен"
+
+            echo "🐍 Активация виртуального окружения"
+            source /opt/qobuz-env/bin/activate
+
+            echo "📦 Установка зависимостей"
+            pip install -r requirements.txt
+
+            echo "🧼 Убиваем старый процесс бота (если есть)"
+            pkill -f music_bot.py || echo "Нет запущенного процесса — всё чисто"
+
+            echo "🚀 Запуск нового бота"
+            nohup /opt/qobuz-env/bin/python3 music_bot.py > bot.log 2>&1 &
