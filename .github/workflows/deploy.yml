@@ -17,26 +17,19 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
+          username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            echo "📁 Переходим в директорию проекта"
+            echo "📁 Переходим в директорию"
             cd ~/musicBot
 
-            echo "🔄 Настройка pull без rebase"
+            echo "🔄 Настройка pull"
             git config pull.rebase false
-
-            echo "🔄 Обновляем репозиторий"
             git pull origin main
 
-            echo "🐍 Активация виртуального окружения"
-            source /opt/qobuz-env/bin/activate
-
-            echo "📦 Установка зависимостей"
+            echo "🐍 Активация окружения и установка зависимостей"
+            source venv/bin/activate
             pip install -r requirements.txt
 
-            echo "🧼 Убиваем старый процесс бота (если есть)"
-            pkill -f music_bot.py || echo "Нет запущенного процесса — всё чисто"
-
-            echo "🚀 Запуск нового бота"
-            nohup /opt/qobuz-env/bin/python3 music_bot.py > bot.log 2>&1 &
+            echo "♻️ Перезапуск systemd сервиса"
+            systemctl restart musicbot.service

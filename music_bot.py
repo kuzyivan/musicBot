@@ -2,13 +2,19 @@ import os
 import logging
 import asyncio
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
 from dotenv import load_dotenv
 from subprocess import Popen, PIPE
 from uuid import uuid4
 from threading import Lock
 
-# Загрузка .env
+# Загрузка переменных окружения из .env
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -18,27 +24,29 @@ QOBUZ_DL = "/opt/qobuz-env/bin/qobuz-dl"
 DOWNLOAD_DIR = "/root/musicBot/Qobuz/Downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Логирование
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Очередь загрузок
+# Очередь на загрузку и блокировка
 download_queue = asyncio.Queue()
 download_lock = Lock()
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎵 Привет! Отправь ссылку на трек Qobuz после команды /download")
+    await update.message.reply_text(
+        "🎵 Привет! Я KuzyMusicBot.\n"
+        "Чтобы скачать трек с Qobuz, отправь ссылку после команды /download"
+    )
 
-# Обработка команды /download
+# Команда /download
 async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📎 Отправь ссылку на трек Qobuz одним сообщением")
-    return
 
-# Обработка ссылки
+# Обработка любого текстового сообщения (для ссылки)
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if "qobuz.com/track/" in text:
@@ -47,7 +55,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Это не ссылка на трек Qobuz!")
 
-# Воркер загрузки
+# Воркер для асинхронной загрузки
 async def download_worker():
     while True:
         update, context, url = await download_queue.get()
@@ -58,7 +66,7 @@ async def download_worker():
             logger.info(f"🔻 Начинаем загрузку: {url}")
             await context.bot.send_message(chat_id, f"🚀 Начинаю загрузку трека по ссылке:\n{url}")
 
-            # Команда загрузки
+            # Команда qobuz-dl
             command = [QOBUZ_DL, "dl", url, "--no-db"]
             process = Popen(command, stdout=PIPE, stderr=PIPE, cwd=DOWNLOAD_DIR)
             stdout, stderr = process.communicate()
@@ -67,21 +75,25 @@ async def download_worker():
             if stderr:
                 logger.error(stderr.decode())
 
-            # Поиск загруженного файла
-            downloaded_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith(".flac") or f.endswith(".mp3")]
+            # Поиск загруженных файлов
+            downloaded_files = [
+                f for f in os.listdir(DOWNLOAD_DIR)
+                if f.endswith(".flac") or f.endswith(".mp3")
+            ]
             if not downloaded_files:
                 await context.bot.send_message(chat_id, "❌ Не удалось найти загруженный файл.")
                 continue
 
             track_file = os.path.join(DOWNLOAD_DIR, downloaded_files[0])
-            cover_file = os.path.join(DOWNLOAD_DIR, "cover.jpg") if os.path.exists(os.path.join(DOWNLOAD_DIR, "cover.jpg")) else None
+            cover_path = os.path.join(DOWNLOAD_DIR, "cover.jpg")
+            cover_file = cover_path if os.path.exists(cover_path) else None
 
-            # Отправка файла
+            # Отправка пользователю
             await context.bot.send_audio(chat_id=chat_id, audio=open(track_file, "rb"))
             if cover_file:
                 await context.bot.send_photo(chat_id=chat_id, photo=open(cover_file, "rb"))
 
-            # Удаление файлов
+            # Удаление файлов после отправки
             os.remove(track_file)
             if cover_file:
                 os.remove(cover_file)
@@ -95,7 +107,7 @@ async def download_worker():
         finally:
             download_queue.task_done()
 
-# Запуск
+# Запуск бота
 if __name__ == "__main__":
     logger.info("🚀 KuzyMusicBot запускается...")
 
@@ -106,5 +118,6 @@ if __name__ == "__main__":
 
     loop = asyncio.get_event_loop()
     loop.create_task(download_worker())
-    logger.info("🤖 KuzyMusicBot запущен")
+
+    logger.info("🤖 KuzyMusicBot запущен и готов к работе")
     application.run_polling()
