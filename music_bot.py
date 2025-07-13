@@ -53,7 +53,6 @@ async def download_worker():
         chat_id = update.effective_chat.id
 
         try:
-            temp_id = uuid4().hex
             logger.info(f"🔻 Начинаем загрузку: {url}")
             await context.bot.send_message(chat_id, f"🚀 Начинаю загрузку трека:\n{url}")
 
@@ -70,16 +69,29 @@ async def download_worker():
             if stderr_decoded:
                 if "Error" in stderr_decoded or "Exception" in stderr_decoded:
                     logger.error(stderr_decoded)
+                    await context.bot.send_message(chat_id, f"❌ Ошибка при загрузке:\n{stderr_decoded}")
+                    continue
                 else:
                     logger.info(stderr_decoded)
 
-            # Поиск загруженных треков
-            downloaded_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith(".flac") or f.endswith(".mp3")]
-            if not downloaded_files:
+            # Проверка успешности по фразе "Completed"
+            if "Completed" not in stdout_decoded:
+                await context.bot.send_message(chat_id, "❌ Загрузка не завершилась корректно.")
+                continue
+
+            # Ждём появления загруженного файла (до 10 сек, проверка каждые 0.5 сек)
+            track_file = None
+            for _ in range(20):
+                files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith(".flac") or f.endswith(".mp3")]
+                if files:
+                    track_file = os.path.join(DOWNLOAD_DIR, files[0])
+                    break
+                await asyncio.sleep(0.5)
+
+            if not track_file or not os.path.exists(track_file):
                 await context.bot.send_message(chat_id, "❌ Не удалось найти загруженный файл.")
                 continue
 
-            track_file = os.path.join(DOWNLOAD_DIR, downloaded_files[0])
             cover_file = os.path.join(DOWNLOAD_DIR, "cover.jpg") if os.path.exists(os.path.join(DOWNLOAD_DIR, "cover.jpg")) else None
 
             # Отправка
@@ -110,7 +122,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("download", download_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
 
-    # Воркер нужно запускать асинхронно внутри PTB
+    # Воркер нужно запускать асинхронно
     async def on_startup(app):
         asyncio.create_task(download_worker())
         logger.info("🤖 KuzyMusicBot запущен и готов к работе")
