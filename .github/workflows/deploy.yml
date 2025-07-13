@@ -1,0 +1,29 @@
+name: 🚀 Автодеплой на сервер
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: 📦 Деплой по SSH
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🔽 Клонируем репозиторий
+        uses: actions/checkout@v3
+
+      - name: 🚀 Подключение по SSH и деплой
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            echo "Подключились на сервер!"
+            cd ~/musicBot
+            git pull origin main
+            systemctl restart musicbot
+            echo "Бот перезапущен!"
