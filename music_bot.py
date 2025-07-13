@@ -37,6 +37,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📎 Отправь ссылку на трек Qobuz одним сообщением")
 
+# Команда /clearqueue
+async def clear_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    queue_size = download_queue.qsize()
+    try:
+        while not download_queue.empty():
+            download_queue.get_nowait()
+            download_queue.task_done()
+        await update.message.reply_text(f"🗑️ Очередь очищена. Удалено задач: {queue_size}")
+        logger.info(f"📛 Очередь очищена пользователем {update.effective_user.id}")
+    except Exception as e:
+        logger.exception("Ошибка при очистке очереди")
+        await update.message.reply_text("❌ Не удалось очистить очередь.")
+
 # Обработка сообщений
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -142,6 +155,7 @@ if __name__ == "__main__":
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("download", download_command))
+    application.add_handler(CommandHandler("clearqueue", clear_queue))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
 
     async def on_startup(app):
