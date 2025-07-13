@@ -68,11 +68,12 @@ async def download_worker():
             logger.info(f"🔻 Начинаем загрузку: {url}")
             await context.bot.send_message(chat_id, f"🚀 Начинаю загрузку трека:\n{url}")
 
-            # Команда загрузки
+            # Команда загрузки с пониженным качеством
             command = [
                 QOBUZ_DL, "dl", url,
                 "--no-db",
-                "--quality", "6"
+                "--quality", "6",
+                "--output", DOWNLOAD_DIR
             ]
             process = Popen(command, stdout=PIPE, stderr=PIPE)
             stdout, stderr = process.communicate()
@@ -102,12 +103,20 @@ async def download_worker():
             file_size = os.path.getsize(track_file)
             size_mb = round(file_size / 1024 / 1024, 2)
 
-            if file_size <= 50 * 1024 * 1024:
-                logger.info(f"📤 Отправка трека как audio ({size_mb} MB)")
-                await context.bot.send_audio(chat_id=chat_id, audio=open(track_file, "rb"))
-            else:
-                logger.info(f"📤 Отправка трека как document ({size_mb} MB)")
-                await context.bot.send_document(chat_id=chat_id, document=open(track_file, "rb"), filename=os.path.basename(track_file))
+            try:
+                if file_size <= 50 * 1024 * 1024:
+                    logger.info(f"📤 Отправка трека как audio ({size_mb} MB)")
+                    await context.bot.send_audio(chat_id=chat_id, audio=open(track_file, "rb"))
+                elif file_size <= 2 * 1024 * 1024 * 1024:
+                    logger.info(f"📤 Отправка трека как document ({size_mb} MB)")
+                    await context.bot.send_document(chat_id=chat_id, document=open(track_file, "rb"), filename=os.path.basename(track_file))
+                else:
+                    await context.bot.send_message(chat_id, "❌ Файл слишком большой для отправки через Telegram (> 2 ГБ).")
+                    logger.warning(f"❗ Файл слишком большой: {track_file} ({size_mb} MB)")
+                    continue
+            except Exception as send_err:
+                logger.exception("🚫 Ошибка при отправке файла")
+                await context.bot.send_message(chat_id, "❌ Не удалось отправить файл. Возможно, он слишком большой или Telegram временно недоступен.")
 
             if cover_file:
                 await context.bot.send_photo(chat_id=chat_id, photo=open(cover_file, "rb"))
