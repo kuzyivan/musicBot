@@ -1,114 +1,53 @@
-import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import subprocess
 import os
-from datetime import datetime
-from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+import glob
 
-# Загрузка .env
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
+# Путь до твоего виртуального окружения
+VENV_PYTHON = "/opt/qobuz-env/bin/python"
+QOBUZ_DL = "/opt/qobuz-env/bin/qobuz-dl"
+DOWNLOAD_DIR = os.path.expanduser("~/Qobuz Downloads")
 
-# Логирование
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler("music_bot.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-
-# --- Команды бота --- #
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    logger.info(f"/start от {user.id} ({user.username})")
-    keyboard = [["/help", "/qobuz"], ["/track", "/download"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(
-        "🎶 Привет! Я KuzyMusicBot — помощник по скачиванию треков с Qobuz.\nНапиши /help, чтобы увидеть команды.",
-        reply_markup=reply_markup
-    )
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "💡 Доступные команды:\n"
-        "/start — приветствие\n"
-        "/help — помощь\n"
-        "/qobuz — о возможностях\n"
-        "/track <ссылка> — инфо о треке\n"
-        "/download <ссылка> — скачать трек"
-    )
-
-
-async def qobuz_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🔊 Я умею скачивать треки с Qobuz в высоком качестве (до 24-bit / 96kHz), "
-        "используя прямые ссылки. Просто пришли мне ссылку через /track или /download."
-    )
-
-
-async def track_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("⚠️ Укажи ссылку на трек после команды. Пример: /track https://open.qobuz.com/track/12345")
+async def download_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("🎵 Пришли ссылку на трек, например:\n/download https://open.qobuz.com/track/118882834")
         return
-    link = context.args[0]
-    await update.message.reply_text(f"🔍 Информация о треке:\n{link}\n(будет извлекаться в будущем обновлении)")
 
+    url = context.args[0]
+    await update.message.reply_text("⏬ Начинаю загрузку трека... Приготовь уши 👂🔥")
 
-async def download_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("⚠️ Укажи ссылку на трек. Пример: /download https://open.qobuz.com/track/12345")
-        return
-    link = context.args[0]
-    await update.message.reply_text(f"⬇️ Начинаю загрузку трека:\n{link}\n(реализация в следующем шаге)")
+    try:
+        # Запуск загрузки трека
+        subprocess.run([QOBUZ_DL, "dl", url], check=True)
 
+        # Поиск загруженного файла
+        audio_files = glob.glob(os.path.join(DOWNLOAD_DIR, "**", "*.flac"), recursive=True)
+        cover_files = glob.glob(os.path.join(DOWNLOAD_DIR, "**", "cover.jpg"), recursive=True)
 
-# --- Запуск --- #
+        if not audio_files:
+            await update.message.reply_text("⚠️ Не удалось найти аудиофайл после загрузки.")
+            return
 
-async def post_init(app):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    logger.info(f"🤖 KuzyMusicBot запущен в {now}")
-    if ADMIN_USER_ID:
-        try:
-            await app.bot.send_message(chat_id=ADMIN_USER_ID, text=f"🤖 KuzyMusicBot запущен\n🕒 {now}")
-        except Exception as e:
-            logger.warning(f"❌ Не удалось отправить сообщение админу: {e}")
+        # Отправка аудиофайла
+        audio_path = audio_files[0]
+        await context.bot.send_audio(chat_id=update.effective_chat.id, audio=open(audio_path, 'rb'))
 
+        # Отправка обложки (если найдена)
+        if cover_files:
+            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=open(cover_files[0], 'rb'))
 
-def main():
-    logger.info("🚀 KuzyMusicBot запускается...")
+        # Удаление всех файлов
+        for file_path in audio_files + cover_files:
+            os.remove(file_path)
 
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    except subprocess.CalledProcessError as e:
+        await update.message.reply_text("❌ Ошибка при загрузке трека.")
+        print(f"[ERROR] Qobuz download error: {e}")
 
-    # Регистрируем команды
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("qobuz", qobuz_info))
-    app.add_handler(CommandHandler("track", track_info))
-    app.add_handler(CommandHandler("download", download_track))
-
-    # Обработка всех ошибок
-    async def error_handler(update, context):
-        logger.error(f"❗ Ошибка: {context.error}")
-        if update and update.message:
-            await update.message.reply_text("Произошла ошибка. Попробуй ещё раз позже.")
-
-    app.add_error_handler(error_handler)
-
-    app.run_polling()
-
+# Регистрируем команду
+app = ApplicationBuilder().token("ТВОЙ_ТОКЕН").build()
+app.add_handler(CommandHandler("download", download_handler))
 
 if __name__ == "__main__":
-    main()
+    app.run_polling()
