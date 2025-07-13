@@ -1,0 +1,25 @@
+name: Deploy to VPS via SSH
+
+on:
+  push:
+    branches:
+      - main  # или master — как у тебя называется основная ветка
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_KEY }}
+        script: |
+          cd ~/musicBot
+          git pull origin main
+          systemctl restart musicbot.service  # если есть systemd unit
