@@ -18,7 +18,7 @@ load_dotenv()
 # Переменные
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 QOBUZ_DL = "/opt/qobuz-env/bin/qobuz-dl"
-DOWNLOAD_DIR = os.path.expanduser("~/Qobuz Downloads")
+DOWNLOAD_DIR = os.path.expanduser("~/musicBot/Qobuz/Downloads")
 
 WAIT_FOR_LINK = range(1)
 download_queue = Queue()
