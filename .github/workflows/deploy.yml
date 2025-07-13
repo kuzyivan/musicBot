@@ -10,18 +10,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout code
+      - name: 📥 Checkout repo
         uses: actions/checkout@v3
 
       - name: 🚀 Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: 109.172.30.183
-          username: root
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             echo "📁 Переходим в директорию проекта"
             cd ~/musicBot
+
+            echo "🔄 Настройка pull без rebase"
+            git config pull.rebase false
 
             echo "🔄 Обновляем репозиторий"
             git pull origin main
