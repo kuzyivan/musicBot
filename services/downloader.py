@@ -38,6 +38,13 @@ class QobuzDownloader:
             return None, None
 
     def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
-        audio_file = next(self.download_dir.glob("**/*.*"), None)
-        cover_file = next(self.download_dir.glob("**/cover.jpg"), None)
-        return audio_file, cover_file
+    """Поиск скачанных файлов"""
+    audio_file = next(
+        (f for f in self.download_dir.glob("**/*.*") if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}),
+        None
+    )
+    cover_file = next(
+        (f for f in self.download_dir.glob("**/cover.jpg") if f.is_file()),
+        None
+    )
+    return audio_file, cover_file
