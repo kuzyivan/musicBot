@@ -29,19 +29,36 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_manager = FileManager()
 
     try:
-        await update.message.reply_text("⏳ Загружаю трек...")
+        await update.message.reply_text("⏳ Пробую скачать трек в лучшем качестве...")
 
-        audio_file, cover_file = await downloader.download_track(url)
+        audio_file = None
+        cover_file = None
+        size = None
 
-        if not audio_file:
-            await update.message.reply_text("❌ Не удалось загрузить трек.")
+        for quality in ["6", "5", "3"]:
+            audio_file, cover_file = await downloader.download_track(url, quality=quality)
+
+            if not audio_file:
+                continue  # Переход к следующему качеству, если не скачалось
+
+            size = file_manager.get_file_size_mb(audio_file)
+
+            if size <= 50:
+                logger.info(f"✅ Успешно загружено в качестве {quality}, размер: {size:.2f} MB")
+                break  # Файл подходит по размеру
+            else:
+                logger.info(f"⚠️ Качество {quality} слишком большое: {size:.2f} MB — пробуем ниже")
+                file_manager.safe_remove(audio_file)
+                file_manager.safe_remove(cover_file)
+                await update.message.reply_text(f"⚠️ Качество {quality} слишком большое ({size:.1f} МБ), пробую ниже...")
+
+        if not audio_file or size > 50:
+            await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
             return
-
-        size = file_manager.get_file_size_mb(audio_file)
 
         # --- Формируем красивое имя файла ---
         original_name = audio_file.name
-        album_folder = audio_file.parent.name  # Например: "Kokoroko - Tuff Times Never Last (2025) [16B-44.1kHz]"
+        album_folder = audio_file.parent.name
 
         match = re.match(r"(?P<artist>.+?) - (?P<album>.+?) \((?P<year>\d{4})", album_folder)
         if match:
@@ -53,22 +70,14 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             album = "Unknown"
             year = "0000"
 
-        # Убираем номер трека в начале
         track_title = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0])
         ext = audio_file.suffix
-
         custom_filename = f"{artist} - {track_title} ({album}, {year}){ext}"
         # ------------------------------------
 
         try:
             with open(audio_file, 'rb') as f:
-                if size <= 50:
-                    await context.bot.send_audio(chat_id, f, filename=custom_filename)
-                elif size <= Config.MAX_FILE_SIZE_MB:
-                    await context.bot.send_document(chat_id, f, filename=custom_filename)
-                else:
-                    await update.message.reply_text("❌ Файл слишком большой для Telegram (>2GB).")
-                    return
+                await context.bot.send_audio(chat_id, f, filename=custom_filename)
 
             if cover_file:
                 with open(cover_file, 'rb') as img:

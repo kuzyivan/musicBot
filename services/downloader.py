@@ -11,13 +11,14 @@ class QobuzDownloader:
         self.download_dir = Config.DOWNLOAD_DIR
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
-    async def download_track(self, url: str) -> Tuple[Optional[Path], Optional[Path]]:
+    async def download_track(self, url: str, quality: str = "6") -> Tuple[Optional[Path], Optional[Path]]:
+        """Скачивание трека с заданным качеством"""
         try:
             cmd = [
                 str(Config.QOBUZ_DL_PATH),
                 "dl", url,
                 "--no-db",
-                "--quality", "6"
+                "--quality", quality
             ]
 
             result = subprocess.run(
