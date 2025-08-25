@@ -3,13 +3,13 @@ beautifulsoup4==4.13.4
 certifi==2025.7.9
 charset-normalizer==3.4.2
 colorama==0.4.6
-h11==0.16.0
+h11==0.14.0
 httpcore==1.0.9
 httpx==0.25.2
 idna==3.10
 mutagen==1.47.0
 pathvalidate==3.3.1
-pick==1.6.01
+pick==1.6.0
 python-telegram-bot==20.7
 qobuz-dl==0.9.9.10
 requests==2.32.4
@@ -18,5 +18,4 @@ soupsieve==2.7
 tqdm==4.67.1
 typing_extensions==4.14.1
 urllib3==2.5.0
-python-telegram-bot==20.7
 python-dotenv
