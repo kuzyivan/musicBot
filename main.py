@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 def setup_logging():
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        level=logging.INFO,
+        level=logging.DEBUG,
         filename=Config.LOG_FILE,
         filemode="a"
     )
