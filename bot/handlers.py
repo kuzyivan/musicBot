@@ -55,12 +55,12 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio_file_to_send = None
     cover_file_to_send = None
     files_to_delete = set()
+    track_details = {} # --- Словарь для хранения информации о треке
 
     try:
         sent_message = await update.message.reply_text("⏳ Начинаю поиск...")
         
-        # --- Гибридная логика: сначала понижение качества, потом конвертация ---
-        for i, (quality_name, quality_id) in enumerate(QUALITY_HIERARCHY.items()):
+        for quality_name, quality_id in QUALITY_HIERARCHY.items():
             await context.bot.edit_message_text(
                 chat_id=chat_id, message_id=sent_message.message_id,
                 text=f"💿 Пробую скачать в качестве: {quality_name}..."
@@ -77,14 +77,12 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             size_mb = file_manager.get_file_size_mb(audio_file)
             
             if size_mb <= 48:
-                logger.info(f"Файл подходит по размеру ({size_mb:.2f} MB).")
                 audio_file_to_send = audio_file
                 cover_file_to_send = cover_file
+                track_details['quality_name'] = quality_name # Сохраняем имя качества
                 break
             else:
-                logger.warning(f"Файл слишком большой ({size_mb:.2f} MB).")
-                # Если это последняя попытка и файл все еще большой - конвертируем
-                is_last_attempt = (i == len(QUALITY_HIERARCHY) - 1)
+                is_last_attempt = (quality_id == list(QUALITY_HIERARCHY.values())[-1])
                 if is_last_attempt:
                     await context.bot.edit_message_text(
                         chat_id=chat_id, message_id=sent_message.message_id,
@@ -95,7 +93,8 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         files_to_delete.add(converted_file)
                         audio_file_to_send = converted_file
                         cover_file_to_send = cover_file
-                    break # Выходим из цикла после попытки конвертации
+                        track_details['quality_name'] = "MP3 (320 kbps)" # Указываем качество MP3
+                    break
 
         if not audio_file_to_send:
             await context.bot.edit_message_text(
@@ -109,17 +108,42 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="📤 Файл готов, начинается отправка в Telegram..."
         )
 
-        original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name # Берем имя от исходника
+        # --- Собираем всю информацию о треке ---
+        original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name
         album_folder = audio_file_to_send.parent.name
+        
         match = re.match(r"(?P<artist>.+?) - (?P<album>.+?) \((?P<year>\d{4})", album_folder)
-        artist, album, year = match.groups() if match else ("Unknown", "Unknown", "0000")
+        if match:
+            track_details['artist'], track_details['album'], track_details['year'] = map(str.strip, match.groups())
+        else:
+            track_details['artist'], track_details['album'], track_details['year'] = "Unknown", "Unknown", "0000"
 
-        track_title = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0])
+        # Достаем техническую информацию о качестве из названия папки
+        quality_tech_info = re.search(r"\[(.*?)\]", album_folder)
+        if quality_tech_info:
+            track_details['quality_name'] += f" [{quality_tech_info.group(1)}]"
+
+        track_details['title'] = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0]).strip()
         ext = audio_file_to_send.suffix
-        custom_filename = f"{artist.strip()} - {track_title.strip()} ({album.strip()}, {year.strip()}){ext}"
+        custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
+
+        # --- Формируем красивую подпись ---
+        caption_text = (
+            f"**Качество:** {track_details.get('quality_name', 'N/A')}\n"
+            f"**Артист:** {track_details.get('artist', 'N/A')}\n"
+            f"**Трек:** {track_details.get('title', 'N/A')}\n"
+            f"**Альбом:** {track_details.get('album', 'N/A')}\n"
+            f"**Год:** {track_details.get('year', 'N/A')}"
+        )
         
         with open(audio_file_to_send, 'rb') as f:
-            await context.bot.send_audio(chat_id, f, filename=custom_filename)
+            await context.bot.send_audio(
+                chat_id=chat_id, 
+                audio=f, 
+                filename=custom_filename,
+                caption=caption_text, # <-- Добавляем подпись
+                parse_mode='Markdown' # Включаем форматирование
+            )
 
         if cover_file_to_send:
             with open(cover_file_to_send, 'rb') as img:
