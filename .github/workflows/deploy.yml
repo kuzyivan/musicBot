@@ -8,7 +8,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: 📥 Checkout repo
         uses: actions/checkout@v3
@@ -20,34 +19,50 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            REPO_SSH_URL="git@github.com:kuzyivan/musicBot.git"
+            # --- Переменные ---
             APP_DIR="/root/musicBot"
+            REPO_URL="https://github.com/kuzyivan/musicBot.git"
 
-            echo "📁 Переходим в директорию"
+            # --- Переход в директорию и обновление кода ---
+            echo "📁 Переход в директорию проекта..."
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
 
-            echo "🔧 Проверяем и клонируем репозиторий"
+            echo "🔧 Обновление репозитория..."
             if [ ! -d .git ]; then
-              git clone "$REPO_SSH_URL" .
-              echo "✅ Репозиторий успешно склонирован."
+              git clone "$REPO_URL" .
             else
-              echo "✅ Репозиторий уже существует. Обновляем."
-              git config pull.rebase false
-              git remote set-url origin "$REPO_SSH_URL"
               git pull origin main
             fi
 
-            echo "🐍 Активация окружения и установка зависимостей"
+            # --- Создание .env файла из секретов GitHub ---
+            echo "🤫 Создание .env файла из секретов..."
+            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
+            echo "QOBUZ_LOGIN=${{ secrets.QOBUZ_LOGIN }}" >> .env
+            echo "QOBUZ_PASSWORD=${{ secrets.QOBUZ_PASSWORD }}" >> .env
+            echo "✅ .env файл создан."
+
+            # --- Настройка виртуального окружения Python ---
+            echo "🐍 Настройка виртуального окружения..."
+            if [ ! -d "venv" ]; then
+              echo "Создание нового venv..."
+              python3 -m venv venv
+            fi
             source venv/bin/activate
+
+            # --- Установка зависимостей ---
+            echo "📦 Установка зависимостей..."
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            echo "🧹 Создаем директорию для логов"
+            # --- Создание необходимых директорий ---
+            echo "📁 Создание директорий для логов и загрузок..."
             mkdir -p logs
+            mkdir -p Qobuz/Downloads
 
-            echo "♻️ Перезапуск systemd сервиса"
+            # --- Перезапуск сервиса ---
+            echo "♻️ Перезапуск сервиса musicbot..."
             systemctl daemon-reload
             systemctl restart musicbot.service
 
-            echo "✅ Развертывание завершено успешно!"
+            echo "✅ Развертывание успешно завершено!"

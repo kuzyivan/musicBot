@@ -25,10 +25,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = ""
-    # Проверяем, пришла ли ссылка с командой /download
     if context.args:
         url = context.args[0]
-    # Или ссылка пришла обычным сообщением
     elif update.message and update.message.text:
         url = update.message.text.strip()
 
@@ -39,7 +37,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     logger.info(f"Получен запрос на скачивание: {url}")
 
-    # --- ИСПРАВЛЕННОЕ РЕГУЛЯРНОЕ ВЫРАЖЕНИЕ ---
     if not re.match(r"https?://(www\.|open\.)?qobuz\.com/track/.+", url):
         logger.warning(f"Некорректная ссылка от пользователя {chat_id}: {url}")
         await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
@@ -47,10 +44,9 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     downloader = QobuzDownloader()
     file_manager = FileManager()
-    logger.debug(f"Инициализированы Downloader и FileManager для {url}")
 
     try:
-        await update.message.reply_text("⏳ Пробую скачать трек в лучшем качестве...")
+        await update.message.reply_text("⏳ Пробую скачать трек...")
         logger.info("Начинается попытка скачивания...")
 
         audio_file = None
@@ -62,17 +58,20 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             audio_file, cover_file = await downloader.download_track(url, quality=quality)
             if audio_file:
                 size = file_manager.get_file_size_mb(audio_file)
-                logger.info(f"Файл успешно скачан, размер: {size:.2f} MB")
-                break
+                if size <= 50:
+                    logger.info(f"Файл успешно скачан, размер: {size:.2f} MB. Подходит.")
+                    break
+                else:
+                    logger.warning(f"Файл скачан, но слишком большой ({size:.2f} MB). Пробую ниже качество.")
+                    file_manager.safe_remove(audio_file) # Удаляем слишком большой файл
+                    audio_file = None # Сбрасываем, чтобы цикл продолжился
             else:
                 logger.warning(f"Не удалось скачать в качестве {quality}")
-
-        if not audio_file or size > 50:
-            logger.error(f"Не удалось получить файл подходящего размера для {url}. Последний размер: {size:.2f} MB")
-            await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
-            # Важно удалить файлы, если они все же скачались, но не подошли по размеру
-            file_manager.safe_remove(audio_file)
-            file_manager.safe_remove(cover_file)
+        
+        # --- ИСПРАВЛЕНА ЛОГИКА ПРОВЕРКИ И ЛОГИРОВАНИЯ ---
+        if not audio_file:
+            logger.error(f"Не удалось скачать файл для {url} ни в одном из качеств.")
+            await update.message.reply_text("❌ Не удалось скачать файл. Попробуйте другую ссылку.")
             return
 
         original_name = audio_file.name
@@ -84,8 +83,8 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             album = match.group("album").strip()
             year = match.group("year").strip()
         else:
-            artist = "Unknown"
-            album = "Unknown"
+            artist = "Unknown Artist"
+            album = "Unknown Album"
             year = "0000"
 
         track_title = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0])
