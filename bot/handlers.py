@@ -37,7 +37,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     logger.info(f"Получен запрос на скачивание: {url}")
 
-    if not re.match(r"https?://(www\.|open\.)?qobuz\.com/track/.+", url):
+    if not re.match(r"https?://(www\.|open\.|play\.)?qobuz\.com/(.+)", url):
         logger.warning(f"Некорректная ссылка от пользователя {chat_id}: {url}")
         await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
         return
@@ -48,31 +48,22 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_text("⏳ Пробую скачать трек...")
         logger.info("Начинается попытка скачивания...")
-
-        audio_file = None
-        cover_file = None
-        size = None
-
-        for quality in ["6", "5", "3"]:
-            logger.info(f"Пробую качество: {quality}")
-            audio_file, cover_file = await downloader.download_track(url, quality=quality)
-            if audio_file:
-                size = file_manager.get_file_size_mb(audio_file)
-                if size <= 50:
-                    logger.info(f"Файл успешно скачан, размер: {size:.2f} MB. Подходит.")
-                    break
-                else:
-                    logger.warning(f"Файл скачан, но слишком большой ({size:.2f} MB). Пробую ниже качество.")
-                    file_manager.safe_remove(audio_file) # Удаляем слишком большой файл
-                    audio_file = None # Сбрасываем, чтобы цикл продолжился
-            else:
-                logger.warning(f"Не удалось скачать в качестве {quality}")
         
-        # --- ИСПРАВЛЕНА ЛОГИКА ПРОВЕРКИ И ЛОГИРОВАНИЯ ---
+        # Убираем цикл по качеству. Просто вызываем скачивание один раз.
+        audio_file, cover_file = await downloader.download_track(url)
+        
         if not audio_file:
-            logger.error(f"Не удалось скачать файл для {url} ни в одном из качеств.")
+            logger.error(f"Не удалось скачать файл для {url}.")
             await update.message.reply_text("❌ Не удалось скачать файл. Попробуйте другую ссылку.")
             return
+
+        size = file_manager.get_file_size_mb(audio_file)
+        if size > 50:
+             logger.error(f"Файл слишком большой для отправки: {size:.2f} MB")
+             await update.message.reply_text(f"❌ Файл слишком большой ({size:.2f} MB) для отправки в Telegram.")
+             file_manager.safe_remove(audio_file)
+             file_manager.safe_remove(cover_file)
+             return
 
         original_name = audio_file.name
         album_folder = audio_file.parent.name

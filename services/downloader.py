@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Optional, Tuple
 from config import Config
 import logging
-import os
 from qobuz_dl.core import QobuzDL
 
 logger = logging.getLogger(__name__)
@@ -27,20 +26,17 @@ class QobuzDownloader:
             logger.exception("Не удалось инициализировать клиент Qobuz!")
             self.client = None
 
-    async def download_track(self, url: str, quality: str) -> Tuple[Optional[Path], Optional[Path]]:
+    async def download_track(self, url: str) -> Tuple[Optional[Path], Optional[Path]]:
         if not self.client:
             logger.error("Клиент Qobuz не инициализирован. Скачивание невозможно.")
             return None, None
             
         try:
-            quality_id = int(quality)
-            logger.info(f"Запуск скачивания для URL: {url} с качеством ID: {quality_id}")
+            logger.info(f"Запуск скачивания для URL: {url}")
             
-            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
-            # Заменили неправильный аргумент 'quality' на правильный 'limit_quality'
+            # Вызываем функцию handle_url БЕЗ параметра качества, как в документации
             self.client.handle_url(
                 url,
-                limit_limit_quality=quality_id,
                 output_dir=self.download_dir,
                 embed_art=True,
                 no_db=True
