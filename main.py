@@ -10,12 +10,15 @@ def setup_logging():
     
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        level=logging.INFO, # Рекомендуется INFO для продакшена, DEBUG для отладки
+        level=logging.INFO,
         handlers=[
             logging.FileHandler(Config.LOG_FILE, mode="a"),
-            logging.StreamHandler() # Добавляем вывод в консоль
+            logging.StreamHandler()
         ]
     )
+    # Понижаем уровень логирования для "болтливых" библиотек, чтобы скрыть токен
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 
 def main():
     load_dotenv()
@@ -26,9 +29,7 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("download", handle_download))
     
-    # --- ДОБАВЛЕН НОВЫЙ ОБРАБОТЧИК ---
-    # Он будет ловить все текстовые сообщения, которые содержат "qobuz.com/track/"
-    # и не являются командами
+    # Обработчик для ссылок, отправленных без команды
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.Regex(r"qobuz\.com/track/"), 
         handle_download
