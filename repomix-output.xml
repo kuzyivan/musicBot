@@ -1,0 +1,548 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.github/
+  workflows/
+    deploy.yml
+.repomix/
+  bundles.json
+bot/
+  handlers.py
+services/
+  downloader.py
+  file_manager.py
+.gitignore
+.music_botOLD
+config.py
+main.py
+README.md
+requirements.txt
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".repomix/bundles.json">
+{
+  "bundles": {
+    "repomixMusicBot-325": {
+      "name": "repomixMusicBot",
+      "created": "2025-08-25T12:10:15.936Z",
+      "lastUsed": "2025-08-25T12:10:15.936Z",
+      "tags": [],
+      "files": []
+    }
+  }
+}
+</file>
+
+<file path="services/file_manager.py">
+from pathlib import Path
+from typing import Optional
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+class FileManager:
+    @staticmethod
+    def safe_remove(file_path: Optional[Path]):
+        if file_path and file_path.exists():
+            try:
+                os.unlink(file_path)
+                logger.info(f"Удалён файл: {file_path}")
+            except OSError as e:
+                logger.warning(f"Не удалось удалить файл {file_path}: {e}")
+
+    @staticmethod
+    def get_file_size_mb(file_path: Path) -> float:
+        return file_path.stat().st_size / (1024 * 1024)
+</file>
+
+<file path=".gitignore">
+.env
+__pycache__/
+*.pyc
+Qobuz_Downloads/
+bot.log
+venv/
+</file>
+
+<file path=".music_botOLD">
+import os
+import logging
+import asyncio
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from dotenv import load_dotenv
+from subprocess import Popen, PIPE
+from uuid import uuid4
+from threading import Lock
+
+# Загрузка переменных окружения
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Пути
+VENV_PYTHON = "/opt/qobuz-env/bin/python"
+QOBUZ_DL = "/opt/qobuz-env/bin/qobuz-dl"
+DOWNLOAD_DIR = "/root/musicBot/Qobuz/Downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# Логирование
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# Очередь и блокировка
+download_queue = asyncio.Queue()
+download_lock = Lock()
+
+# Команда /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🎵 Привет! Отправь ссылку на трек Qobuz после команды /download")
+
+# Команда /download
+async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📎 Отправь ссылку на трек Qobuz одним сообщением")
+
+# Обработка сообщений
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if "qobuz.com/track/" in text:
+        await download_queue.put((update, context, text))
+        await update.message.reply_text("⏳ Трек добавлен в очередь загрузки... 🌀")
+    else:
+        await update.message.reply_text("❌ Это не ссылка на трек Qobuz!")
+
+# Рекурсивный поиск аудиофайлов
+def find_audio_files(directory):
+    found_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith((".flac", ".mp3")):
+                full_path = os.path.join(root, file)
+                logger.info(f"🔍 Найден файл: {full_path}")
+                found_files.append(full_path)
+    return found_files
+
+# Воркер загрузки
+async def download_worker():
+    while True:
+        update, context, url = await download_queue.get()
+        chat_id = update.effective_chat.id
+
+        try:
+            temp_id = uuid4().hex
+            logger.info(f"🔻 Начинаем загрузку: {url}")
+            await context.bot.send_message(chat_id, f"🚀 Начинаю загрузку трека:\n{url}")
+
+            # Переход в папку загрузки
+            os.chdir(DOWNLOAD_DIR)
+
+            # Команда загрузки с пониженным качеством
+            command = [
+                QOBUZ_DL, "dl", url,
+                "--no-db",
+                "--quality", "6"
+            ]
+            process = Popen(command, stdout=PIPE, stderr=PIPE)
+            stdout, stderr = process.communicate()
+
+            stdout_decoded = stdout.decode().strip()
+            stderr_decoded = stderr.decode().strip()
+
+            if stdout_decoded:
+                logger.info(stdout_decoded)
+            if stderr_decoded:
+                if "Error" in stderr_decoded or "Exception" in stderr_decoded:
+                    logger.error(stderr_decoded)
+                else:
+                    logger.info(stderr_decoded)
+
+            # Поиск аудиофайлов
+            downloaded_files = find_audio_files(DOWNLOAD_DIR)
+            if not downloaded_files:
+                await context.bot.send_message(chat_id, "❌ Загрузка не завершилась корректно.")
+                continue
+
+            track_file = downloaded_files[0]
+            cover_file = os.path.join(os.path.dirname(track_file), "cover.jpg")
+            cover_file = cover_file if os.path.exists(cover_file) else None
+
+            # Проверка размера
+            file_size = os.path.getsize(track_file)
+            size_mb = round(file_size / 1024 / 1024, 2)
+
+            try:
+                if file_size <= 50 * 1024 * 1024:
+                    logger.info(f"📤 Отправка трека как audio ({size_mb} MB)")
+                    await context.bot.send_audio(chat_id=chat_id, audio=open(track_file, "rb"))
+                elif file_size <= 2 * 1024 * 1024 * 1024:
+                    logger.info(f"📤 Отправка трека как document ({size_mb} MB)")
+                    await context.bot.send_document(chat_id=chat_id, document=open(track_file, "rb"), filename=os.path.basename(track_file))
+                else:
+                    await context.bot.send_message(chat_id, "❌ Файл слишком большой для отправки через Telegram (> 2 ГБ).")
+                    logger.warning(f"❗ Файл слишком большой: {track_file} ({size_mb} MB)")
+                    continue
+            except Exception as send_err:
+                logger.exception("🚫 Ошибка при отправке файла")
+                await context.bot.send_message(chat_id, "❌ Не удалось отправить файл. Возможно, он слишком большой или Telegram временно недоступен.")
+
+            if cover_file:
+                await context.bot.send_photo(chat_id=chat_id, photo=open(cover_file, "rb"))
+
+            # Удаление
+            os.remove(track_file)
+            if cover_file:
+                os.remove(cover_file)
+
+            await context.bot.send_message(chat_id, "✅ Готово! Трек отправлен и удалён с сервера.")
+
+        except Exception as e:
+            logger.exception("❗ Ошибка при загрузке трека")
+            await context.bot.send_message(chat_id, f"❗ Ошибка при загрузке: {str(e)}")
+
+        finally:
+            download_queue.task_done()
+
+# Основной запуск
+if __name__ == "__main__":
+    logger.info("🚀 KuzyMusicBot запускается...")
+
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("download", download_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
+
+    async def on_startup(app):
+        asyncio.create_task(download_worker())
+        logger.info("🤖 KuzyMusicBot запущен и готов к работе")
+
+    application.post_init = on_startup
+    application.run_polling()
+</file>
+
+<file path="config.py">
+from pathlib import Path
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+class Config:
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
+    DOWNLOAD_DIR = Path("/root/musicBot/Qobuz/Downloads")
+    QOBUZ_DL_PATH = Path("/opt/qobuz-env/bin/qobuz-dl")
+    MAX_FILE_SIZE_MB = 2000  # 2 GB
+    LOG_FILE = Path("logs/bot.log")
+</file>
+
+<file path="main.py">
+import logging
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from bot.handlers import start, help_command, handle_download
+from config import Config
+
+def setup_logging():
+    logging.basicConfig(
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        level=logging.INFO,
+        filename=Config.LOG_FILE,
+        filemode="a"
+    )
+
+def main():
+    setup_logging()
+    app = ApplicationBuilder().token(Config.BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_download))
+
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="bot/handlers.py">
+from telegram import Update
+from telegram.ext import ContextTypes
+from services.downloader import QobuzDownloader
+from services.file_manager import FileManager
+from config import Config
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🎵 Привет! Я могу скачивать треки с Qobuz.\n"
+        "Отправь ссылку на трек после команды /download"
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "/start — приветствие\n"
+        "/download <ссылка> — скачать трек с Qobuz\n"
+        "/help — список команд"
+    )
+
+async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
+    chat_id = update.effective_chat.id
+
+    downloader = QobuzDownloader()
+    file_manager = FileManager()
+
+    try:
+        await update.message.reply_text("⏳ Пробую скачать трек в лучшем качестве...")
+
+        audio_file = None
+        cover_file = None
+        size = None
+
+        for quality in ["6", "5", "3"]:
+            audio_file, cover_file = await downloader.download_track(url, quality=quality)
+
+            if not audio_file:
+                continue  # Переход к следующему качеству, если не скачалось
+
+            size = file_manager.get_file_size_mb(audio_file)
+
+            if size <= 50:
+                logger.info(f"✅ Успешно загружено в качестве {quality}, размер: {size:.2f} MB")
+                break  # Файл подходит по размеру
+            else:
+                logger.info(f"⚠️ Качество {quality} слишком большое: {size:.2f} MB — пробуем ниже")
+                file_manager.safe_remove(audio_file)
+                file_manager.safe_remove(cover_file)
+                await update.message.reply_text(f"⚠️ Качество {quality} слишком большое ({size:.1f} МБ), пробую ниже...")
+
+        if not audio_file or size > 50:
+            await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
+            return
+
+        # --- Формируем красивое имя файла ---
+        original_name = audio_file.name
+        album_folder = audio_file.parent.name
+
+        match = re.match(r"(?P<artist>.+?) - (?P<album>.+?) \((?P<year>\d{4})", album_folder)
+        if match:
+            artist = match.group("artist").strip()
+            album = match.group("album").strip()
+            year = match.group("year").strip()
+        else:
+            artist = "Unknown"
+            album = "Unknown"
+            year = "0000"
+
+        track_title = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0])
+        ext = audio_file.suffix
+        custom_filename = f"{artist} - {track_title} ({album}, {year}){ext}"
+        # ------------------------------------
+
+        try:
+            with open(audio_file, 'rb') as f:
+                await context.bot.send_audio(chat_id, f, filename=custom_filename)
+
+            if cover_file:
+                with open(cover_file, 'rb') as img:
+                    await context.bot.send_photo(chat_id, img)
+
+            await update.message.reply_text("✅ Трек успешно отправлен!")
+
+        finally:
+            file_manager.safe_remove(audio_file)
+            file_manager.safe_remove(cover_file)
+
+    except Exception as e:
+        logger.exception("Ошибка при загрузке трека")
+        await update.message.reply_text(f"❌ Произошла ошибка: {e}")
+</file>
+
+<file path="requirements.txt">
+anyio==4.9.0
+beautifulsoup4==4.13.4
+certifi==2025.7.9
+charset-normalizer==3.4.2
+colorama==0.4.6
+h11==0.14.0
+httpcore==1.0.9
+httpx==0.25.2
+idna==3.10
+mutagen==1.47.0
+pathvalidate==3.3.1
+pick==1.6.0
+python-telegram-bot==20.7
+qobuz-dl==0.9.9.10
+requests==2.32.4
+sniffio==1.3.1
+soupsieve==2.7
+tqdm==4.67.1
+typing_extensions==4.14.1
+urllib3==2.5.0
+python-dotenv
+</file>
+
+<file path="services/downloader.py">
+import subprocess
+from pathlib import Path
+from typing import Optional, Tuple
+from config import Config
+import logging
+
+logger = logging.getLogger(__name__)
+
+class QobuzDownloader:
+    def __init__(self):
+        self.download_dir = Config.DOWNLOAD_DIR
+        self.download_dir.mkdir(parents=True, exist_ok=True)
+
+    async def download_track(self, url: str, quality: str = "6") -> Tuple[Optional[Path], Optional[Path]]:
+        """Скачивание трека с заданным качеством"""
+        try:
+            cmd = [
+                str(Config.QOBUZ_DL_PATH),
+                "dl", url,
+                "--no-db",
+                "--quality", quality
+            ]
+
+            result = subprocess.run(
+                cmd,
+                cwd=self.download_dir,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            logger.info(f"Qobuz-dl output: {result.stdout}")
+            if result.stderr:
+                logger.warning(f"Qobuz-dl stderr: {result.stderr}")
+
+            return self._find_downloaded_files()
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Download failed: {e.stderr}")
+            return None, None
+
+    def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
+        """Поиск скачанных файлов"""
+        audio_file = next(
+            (f for f in self.download_dir.glob("**/*.*") if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}),
+            None
+        )
+        cover_file = next(
+            (f for f in self.download_dir.glob("**/cover.jpg") if f.is_file()),
+            None
+        )
+        return audio_file, cover_file
+</file>
+
+<file path=".github/workflows/deploy.yml">
+name: 🚀 Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v3
+
+      - name: 🚀 Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "📁 Переходим в директорию"
+            cd ~/musicBot
+
+            echo "🔄 Настройка pull"
+            git config pull.rebase false
+            git pull origin main
+
+            echo "🐍 Активация окружения и установка зависимостей"
+            source venv/bin/activate
+            pip install -r requirements.txt
+
+            echo "♻️ Перезапуск systemd сервиса"
+            systemctl restart musicbot.service
+</file>
+
+<file path="README.md">
+# 🎵 KuzyMusicBot
+
+**Telegram-бот для скачивания и отправки треков с Qobuz**
+
+## ⚙️ Возможности
+
+- Скачивает треки по ссылке с [Qobuz](https://www.qobuz.com/)
+- Отправляет аудиофайл и обложку
+- Удаляет файлы после отправки
+- Логирует действия в файл и Telegram-чат админа
+
+## 🚀 Установка
+
+```bash
+git clone https://github.com/kuzyivan/musicBot.git
+cd musicBot
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # и заполни значения
+
+dead
+</file>
+
+</files>
