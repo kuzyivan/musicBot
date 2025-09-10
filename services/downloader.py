@@ -3,7 +3,6 @@ from typing import Optional, Tuple
 from config import Config
 import logging
 import os
-# --- ДОБАВЬТЕ ЭТУ СТРОКУ ---
 from qobuz_dl.core import QobuzDL
 
 logger = logging.getLogger(__name__)
@@ -28,14 +27,17 @@ class QobuzDownloader:
             logger.exception("Не удалось инициализировать клиент Qobuz!")
             self.client = None
 
-    async def download_track(self, url: str) -> Tuple[Optional[Path], Optional[Path]]:
+    async def download_track(self, url: str, quality_id: int) -> Tuple[Optional[Path], Optional[Path]]:
         if not self.client:
             logger.error("Клиент Qobuz не инициализирован. Скачивание невозможно.")
             return None, None
             
         original_dir = Path.cwd()
         try:
-            logger.info(f"Запуск скачивания для URL: {url}")
+            logger.info(f"Запуск скачивания для URL: {url} с качеством ID: {quality_id}")
+            # --- Новая логика: устанавливаем качество перед скачиванием ---
+            self.client.limit_quality = quality_id
+            
             os.chdir(self.download_dir)
             
             self.client.handle_url(url)
