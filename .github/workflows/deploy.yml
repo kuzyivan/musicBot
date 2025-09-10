@@ -1,35 +1,35 @@
-name: 🚀 Deploy to VPS
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: 📥 Checkout repo
-        uses: actions/checkout@v3
-
-      - name: 🚀 Deploy via SSH
+- name: 🚀 Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            echo "📁 Переходим в директорию"
-            cd ~/musicBot
+            REPO_SSH_URL="git@github.com:kuzyivan/musicBot.git"
+            APP_DIR="/root/musicBot"
 
-            echo "🔄 Настройка pull"
-            git config pull.rebase false
-            git pull origin main
+            echo "📁 Переходим в директорию"
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            echo "🔧 Проверяем и клонируем репозиторий"
+            if [ ! -d .git ]; then
+              git clone "$REPO_SSH_URL" .
+              echo "✅ Репозиторий успешно склонирован."
+            else
+              echo "✅ Репозиторий уже существует. Обновляем."
+              git config pull.rebase false
+              git remote set-url origin "$REPO_SSH_URL"
+              git pull origin main
+            fi
 
             echo "🐍 Активация окружения и установка зависимостей"
             source venv/bin/activate
+            pip install --upgrade pip
             pip install -r requirements.txt
 
             echo "♻️ Перезапуск systemd сервиса"
+            systemctl daemon-reload
             systemctl restart musicbot.service
+
+            echo "✅ Развертывание завершено успешно!"
