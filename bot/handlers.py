@@ -42,22 +42,10 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Пробую скачать трек в лучшем качестве...")
         logger.info("Начинается попытка скачивания...")
 
-        audio_file = None
-        cover_file = None
-        size = None
-
-        for quality in ["6", "5", "3"]:
-            logger.info(f"Пробую качество: {quality}")
-            audio_file, cover_file = await downloader.download_track(url, quality=quality)
-            if audio_file:
-                size = file_manager.get_file_size_mb(audio_file)
-                logger.info(f"Файл успешно скачан, размер: {size:.2f} MB")
-                break
-            else:
-                logger.warning(f"Не удалось скачать в качестве {quality}")
-
-        if not audio_file or size > 50:
-            logger.error(f"Не удалось получить файл подходящего размера для {url}. Последний размер: {size:.2f} MB")
+        audio_file, cover_file = await downloader.download_track(url, quality="FLAC")
+        
+        if not audio_file:
+            logger.error(f"Не удалось найти подходящий файл для {url}.")
             await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
             return
 

@@ -1,4 +1,3 @@
-# services/downloader.py
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
@@ -21,13 +20,13 @@ class QobuzDownloader:
                 "dl", url,
                 "--no-db",
                 "--quality", quality,
-                "--output", str(self.download_dir),
                 "--username", os.getenv("QOBUZ_LOGIN"),
                 "--password", os.getenv("QOBUZ_PASSWORD")
             ]
 
             result = subprocess.run(
                 cmd,
+                cwd=self.download_dir,
                 capture_output=True,
                 text=True,
                 check=True
