@@ -12,7 +12,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Обработана команда /start")
     await update.message.reply_text(
         "🎵 Привет! Я могу скачивать треки с Qobuz.\n"
-        "Отправь ссылку на трек после команды /download"
+        "Отправь мне ссылку на трек или используй команду /download <ссылка>"
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24,15 +24,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("❌ Пожалуйста, укажите ссылку на трек после команды /download.")
+    url = ""
+    # Проверяем, пришла ли ссылка с командой /download
+    if context.args:
+        url = context.args[0]
+    # Или ссылка пришла обычным сообщением
+    elif update.message and update.message.text:
+        url = update.message.text.strip()
+
+    if not url:
+        await update.message.reply_text("❌ Пожалуйста, укажите ссылку на трек.")
         return
 
-    url = context.args[0]
     chat_id = update.effective_chat.id
     logger.info(f"Получен запрос на скачивание: {url}")
 
-    if not re.match(r"https?://(www\.)?qobuz\.com/track/.+", url):
+    # --- ИСПРАВЛЕННОЕ РЕГУЛЯРНОЕ ВЫРАЖЕНИЕ ---
+    if not re.match(r"https?://(www\.|open\.)?qobuz\.com/track/.+", url):
         logger.warning(f"Некорректная ссылка от пользователя {chat_id}: {url}")
         await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
         return
@@ -62,6 +70,9 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not audio_file or size > 50:
             logger.error(f"Не удалось получить файл подходящего размера для {url}. Последний размер: {size:.2f} MB")
             await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
+            # Важно удалить файлы, если они все же скачались, но не подошли по размеру
+            file_manager.safe_remove(audio_file)
+            file_manager.safe_remove(cover_file)
             return
 
         original_name = audio_file.name

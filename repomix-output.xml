@@ -279,36 +279,6 @@ class Config:
     LOG_FILE = Path("logs/bot.log")
 </file>
 
-<file path="main.py">
-import logging
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
-from bot.handlers import start, help_command, handle_download
-from config import Config
-from dotenv import load_dotenv
-
-def setup_logging():
-    logging.basicConfig(
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        level=logging.DEBUG,
-        filename=Config.LOG_FILE,
-        filemode="a"
-    )
-
-def main():
-    load_dotenv()
-    setup_logging()
-    app = ApplicationBuilder().token(Config.BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_download))
-
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
-</file>
-
 <file path="requirements.txt">
 anyio==4.9.0
 beautifulsoup4==4.13.4
@@ -333,167 +303,35 @@ urllib3==2.5.0
 python-dotenv
 </file>
 
-<file path="bot/handlers.py">
-from telegram import Update
-from telegram.ext import ContextTypes
-from services.downloader import QobuzDownloader
-from services.file_manager import FileManager
-from config import Config
+<file path="main.py">
 import logging
-import re
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from bot.handlers import start, help_command, handle_download
+from config import Config
+from dotenv import load_dotenv
 
-logger = logging.getLogger(__name__)
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Обработана команда /start")
-    await update.message.reply_text(
-        "🎵 Привет! Я могу скачивать треки с Qobuz.\n"
-        "Отправь ссылку на трек после команды /download"
+def setup_logging():
+    logging.basicConfig(
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        level=logging.DEBUG,
+        filename=Config.LOG_FILE,
+        filemode="a"
     )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Обработана команда /help")
-    await update.message.reply_text(
-        "/start — приветствие\n"
-        "/download <ссылка> — скачать трек с Qobuz\n"
-        "/help — список команд"
-    )
+def main():
+    load_dotenv()
+    setup_logging()
+    app = ApplicationBuilder().token(Config.BOT_TOKEN).build()
 
-async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text.strip()
-    chat_id = update.effective_chat.id
-    logger.info(f"Получен запрос на скачивание: {url}")
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    # This is the corrected handler
+    app.add_handler(CommandHandler("download", handle_download))
 
-    # Проверка на корректность URL
-    if not re.match(r"https?://(www\.)?qobuz\.com/track/.+", url):
-        logger.warning(f"Некорректная ссылка от пользователя {chat_id}: {url}")
-        await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
-        return
+    app.run_polling()
 
-    downloader = QobuzDownloader()
-    file_manager = FileManager()
-    logger.debug(f"Инициализированы Downloader и FileManager для {url}")
-
-    try:
-        await update.message.reply_text("⏳ Пробую скачать трек в лучшем качестве...")
-        logger.info("Начинается попытка скачивания...")
-
-        audio_file = None
-        cover_file = None
-        size = None
-
-        for quality in ["6", "5", "3"]:
-            logger.info(f"Пробую качество: {quality}")
-            audio_file, cover_file = await downloader.download_track(url, quality=quality)
-            if audio_file:
-                size = file_manager.get_file_size_mb(audio_file)
-                logger.info(f"Файл успешно скачан, размер: {size:.2f} MB")
-                break
-            else:
-                logger.warning(f"Не удалось скачать в качестве {quality}")
-
-        if not audio_file or size > 50:
-            logger.error(f"Не удалось получить файл подходящего размера для {url}. Последний размер: {size:.2f} MB")
-            await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
-            return
-
-        # --- Формируем красивое имя файла ---
-        original_name = audio_file.name
-        album_folder = audio_file.parent.name
-
-        match = re.match(r"(?P<artist>.+?) - (?P<album>.+?) \((?P<year>\d{4})", album_folder)
-        if match:
-            artist = match.group("artist").strip()
-            album = match.group("album").strip()
-            year = match.group("year").strip()
-        else:
-            artist = "Unknown"
-            album = "Unknown"
-            year = "0000"
-
-        track_title = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0])
-        ext = audio_file.suffix
-        custom_filename = f"{artist} - {track_title} ({album}, {year}){ext}"
-        # ------------------------------------
-        
-        try:
-            logger.info("Начинается отправка файла в Telegram.")
-            with open(audio_file, 'rb') as f:
-                await context.bot.send_audio(chat_id, f, filename=custom_filename)
-
-            if cover_file:
-                with open(cover_file, 'rb') as img:
-                    await context.bot.send_photo(chat_id, img)
-            logger.info("Файл успешно отправлен.")
-
-        finally:
-            file_manager.safe_remove(audio_file)
-            file_manager.safe_remove(cover_file)
-            logger.info("Временные файлы удалены.")
-
-    except Exception as e:
-        logger.exception("Общая ошибка при обработке запроса")
-        await update.message.reply_text(f"❌ Произошла ошибка: {e}")
-</file>
-
-<file path="services/downloader.py">
-import subprocess
-from pathlib import Path
-from typing import Optional, Tuple
-from config import Config
-import logging
-
-logger = logging.getLogger(__name__)
-
-class QobuzDownloader:
-    def __init__(self):
-        self.download_dir = Config.DOWNLOAD_DIR
-        self.download_dir.mkdir(parents=True, exist_ok=True)
-
-    async def download_track(self, url: str, quality: str = "6") -> Tuple[Optional[Path], Optional[Path]]:
-        try:
-            logger.info(f"Запуск qobuz-dl для URL: {url} с качеством: {quality}")
-            cmd = [
-                str(Config.QOBUZ_DL_PATH),
-                "dl", url,
-                "--no-db",
-                "--quality", quality,
-                "--output", str(self.download_dir)
-            ]
-
-            result = subprocess.run(
-                cmd,
-                cwd=self.download_dir,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            logger.info(f"Qobuz-dl stdout: {result.stdout}")
-            if result.stderr:
-                logger.warning(f"Qobuz-dl stderr: {result.stderr}")
-
-            audio_file, cover_file = self._find_downloaded_files()
-            if audio_file:
-                logger.info(f"Найден скачанный файл: {audio_file}")
-            else:
-                logger.warning("Скачанный аудиофайл не найден.")
-            
-            return audio_file, cover_file
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Команда qobuz-dl завершилась с ошибкой: {e.stderr}")
-            return None, None
-
-    def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
-        audio_file = next(
-            (f for f in self.download_dir.glob("**/*.*") if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}),
-            None
-        )
-        cover_file = next(
-            (f for f in self.download_dir.glob("**/cover.jpg") if f.is_file()),
-            None
-        )
-        return audio_file, cover_file
+if __name__ == "__main__":
+    main()
 </file>
 
 <file path=".github/workflows/deploy.yml">
@@ -550,6 +388,171 @@ jobs:
             systemctl restart musicbot.service
 
             echo "✅ Развертывание завершено успешно!"
+</file>
+
+<file path="bot/handlers.py">
+from telegram import Update
+from telegram.ext import ContextTypes
+from services.downloader import QobuzDownloader
+from services.file_manager import FileManager
+from config import Config
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("Обработана команда /start")
+    await update.message.reply_text(
+        "🎵 Привет! Я могу скачивать треки с Qobuz.\n"
+        "Отправь ссылку на трек после команды /download"
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("Обработана команда /help")
+    await update.message.reply_text(
+        "/start — приветствие\n"
+        "/download <ссылка> — скачать трек с Qobuz\n"
+        "/help — список команд"
+    )
+
+async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Пожалуйста, укажите ссылку на трек после команды /download.")
+        return
+
+    url = context.args[0]
+    chat_id = update.effective_chat.id
+    logger.info(f"Получен запрос на скачивание: {url}")
+
+    if not re.match(r"https?://(www\.)?qobuz\.com/track/.+", url):
+        logger.warning(f"Некорректная ссылка от пользователя {chat_id}: {url}")
+        await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
+        return
+
+    downloader = QobuzDownloader()
+    file_manager = FileManager()
+    logger.debug(f"Инициализированы Downloader и FileManager для {url}")
+
+    try:
+        await update.message.reply_text("⏳ Пробую скачать трек в лучшем качестве...")
+        logger.info("Начинается попытка скачивания...")
+
+        audio_file = None
+        cover_file = None
+        size = None
+
+        for quality in ["6", "5", "3"]:
+            logger.info(f"Пробую качество: {quality}")
+            audio_file, cover_file = await downloader.download_track(url, quality=quality)
+            if audio_file:
+                size = file_manager.get_file_size_mb(audio_file)
+                logger.info(f"Файл успешно скачан, размер: {size:.2f} MB")
+                break
+            else:
+                logger.warning(f"Не удалось скачать в качестве {quality}")
+
+        if not audio_file or size > 50:
+            logger.error(f"Не удалось получить файл подходящего размера для {url}. Последний размер: {size:.2f} MB")
+            await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
+            return
+
+        original_name = audio_file.name
+        album_folder = audio_file.parent.name
+
+        match = re.match(r"(?P<artist>.+?) - (?P<album>.+?) \((?P<year>\d{4})", album_folder)
+        if match:
+            artist = match.group("artist").strip()
+            album = match.group("album").strip()
+            year = match.group("year").strip()
+        else:
+            artist = "Unknown"
+            album = "Unknown"
+            year = "0000"
+
+        track_title = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0])
+        ext = audio_file.suffix
+        custom_filename = f"{artist} - {track_title} ({album}, {year}){ext}"
+        
+        try:
+            logger.info("Начинается отправка файла в Telegram.")
+            with open(audio_file, 'rb') as f:
+                await context.bot.send_audio(chat_id, f, filename=custom_filename)
+
+            if cover_file:
+                with open(cover_file, 'rb') as img:
+                    await context.bot.send_photo(chat_id, img)
+            logger.info("Файл успешно отправлен.")
+
+        finally:
+            file_manager.safe_remove(audio_file)
+            file_manager.safe_remove(cover_file)
+            logger.info("Временные файлы удалены.")
+
+    except Exception as e:
+        logger.exception("Общая ошибка при обработке запроса")
+        await update.message.reply_text(f"❌ Произошла ошибка: {e}")
+</file>
+
+<file path="services/downloader.py">
+import subprocess
+from pathlib import Path
+from typing import Optional, Tuple
+from config import Config
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+class QobuzDownloader:
+    def __init__(self):
+        self.download_dir = Config.DOWNLOAD_DIR
+        self.download_dir.mkdir(parents=True, exist_ok=True)
+
+    async def download_track(self, url: str, quality: str = "6") -> Tuple[Optional[Path], Optional[Path]]:
+        try:
+            logger.info(f"Запуск qobuz-dl для URL: {url} с качеством: {quality}")
+            cmd = [
+                str(Config.QOBUZ_DL_PATH),
+                "dl", url,
+                "--no-db",
+                "--quality", quality,
+                "--username", os.getenv("QOBUZ_LOGIN"),
+                "--password", os.getenv("QOBUZ_PASSWORD")
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            logger.info(f"Qobuz-dl stdout: {result.stdout}")
+            if result.stderr:
+                logger.warning(f"Qobuz-dl stderr: {result.stderr}")
+
+            audio_file, cover_file = self._find_downloaded_files()
+            if audio_file:
+                logger.info(f"Найден скачанный файл: {audio_file}")
+            else:
+                logger.warning("Скачанный аудиофайл не найден.")
+            
+            return audio_file, cover_file
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Команда qobuz-dl завершилась с ошибкой: {e.stderr}")
+            return None, None
+
+    def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
+        audio_file = next(
+            (f for f in self.download_dir.glob("**/*.*") if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}),
+            None
+        )
+        cover_file = next(
+            (f for f in self.download_dir.glob("**/cover.jpg") if f.is_file()),
+            None
+        )
+        return audio_file, cover_file
 </file>
 
 <file path="README.md">
