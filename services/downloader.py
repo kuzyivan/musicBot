@@ -12,8 +12,8 @@ class QobuzDownloader:
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
     async def download_track(self, url: str, quality: str = "6") -> Tuple[Optional[Path], Optional[Path]]:
-        """Скачивание трека с заданным качеством"""
         try:
+            logger.info(f"Запуск qobuz-dl для URL: {url} с качеством: {quality}")
             cmd = [
                 str(Config.QOBUZ_DL_PATH),
                 "dl", url,
@@ -29,17 +29,22 @@ class QobuzDownloader:
                 check=True
             )
 
-            logger.info(f"Qobuz-dl output: {result.stdout}")
+            logger.info(f"Qobuz-dl stdout: {result.stdout}")
             if result.stderr:
                 logger.warning(f"Qobuz-dl stderr: {result.stderr}")
 
-            return self._find_downloaded_files()
+            audio_file, cover_file = self._find_downloaded_files()
+            if audio_file:
+                logger.info(f"Найден скачанный файл: {audio_file}")
+            else:
+                logger.warning("Скачанный аудиофайл не найден.")
+            
+            return audio_file, cover_file
         except subprocess.CalledProcessError as e:
-            logger.error(f"Download failed: {e.stderr}")
+            logger.error(f"Команда qobuz-dl завершилась с ошибкой: {e.stderr}")
             return None, None
 
     def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
-        """Поиск скачанных файлов"""
         audio_file = next(
             (f for f in self.download_dir.glob("**/*.*") if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}),
             None
