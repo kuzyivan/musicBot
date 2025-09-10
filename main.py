@@ -19,6 +19,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    # This is the corrected handler
     app.add_handler(CommandHandler("download", handle_download))
 
     app.run_polling()
