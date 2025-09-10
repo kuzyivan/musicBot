@@ -40,7 +40,7 @@ class QobuzDownloader:
             # Заменили неправильный аргумент 'quality' на правильный 'limit_quality'
             self.client.handle_url(
                 url,
-                limit_limit_quality=quality_id,
+                limit_quality=quality_id,
                 output_dir=self.download_dir,
                 embed_art=True,
                 no_db=True
