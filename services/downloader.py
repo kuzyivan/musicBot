@@ -16,18 +16,16 @@ class QobuzDownloader:
         try:
             logger.info(f"Запуск qobuz-dl для URL: {url} с качеством: {quality}")
             cmd = [
-                str(Config.QOBUZ_DL_PATH),
+                str(Config.QOBUZ_DL_PATH),  # Правильный путь к исполняемому файлу
                 "dl", url,
-                "--no-db",
+                "--output", str(self.download_dir),  # Используем --output
                 "--quality", quality,
-                "--output", str(self.download_dir),
-                "--username", os.getenv("QOBUZ_LOGIN"),
-                "--password", os.getenv("QOBUZ_PASSWORD")
+                "--username", os.getenv("QOBUZ_LOGIN"), # Используем логин из .env
+                "--password", os.getenv("QOBUZ_PASSWORD") # Используем пароль из .env
             ]
 
             result = subprocess.run(
                 cmd,
-                cwd=self.download_dir,
                 capture_output=True,
                 text=True,
                 check=True
