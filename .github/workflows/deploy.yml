@@ -43,6 +43,9 @@ jobs:
             pip install --upgrade pip
             pip install -r requirements.txt
 
+            echo "🧹 Создаем директорию для логов"
+            mkdir -p logs
+
             echo "♻️ Перезапуск systemd сервиса"
             systemctl daemon-reload
             systemctl restart musicbot.service
