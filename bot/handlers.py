@@ -27,7 +27,7 @@ def convert_to_mp3(file_path: Path) -> Path:
 
 # --- Словарь качеств ---
 QUALITY_HIERARCHY = {
-    "HI-RES (24-bit < 96kHz)": 7,
+    "HI-RES (Max)": 27,
     "CD (16-bit)": 6,
     "MP3 (320 kbps)": 5,
 }
@@ -60,7 +60,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         sent_message = await update.message.reply_text("⏳ Начинаю поиск...")
         
-        for quality_name, quality_id in QUALITY_HIERARCHY.items():
+        for i, (quality_name, quality_id) in enumerate(QUALITY_HIERARCHY.items()):
             await context.bot.edit_message_text(
                 chat_id=chat_id, message_id=sent_message.message_id,
                 text=f"💿 Пробую скачать в качестве: {quality_name}..."
@@ -82,7 +82,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 track_details['quality_name'] = quality_name
                 break
             else:
-                is_last_attempt = (quality_id == list(QUALITY_HIERARCHY.values())[-1])
+                is_last_attempt = (i == len(QUALITY_HIERARCHY) - 1)
                 if is_last_attempt:
                     await context.bot.edit_message_text(
                         chat_id=chat_id, message_id=sent_message.message_id,
@@ -120,8 +120,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         track_details['title'] = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0]).strip()
         ext = audio_file_to_send.suffix
         custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
-
-        # --- Формируем подпись без технической информации ---
+        
         caption_text = (
             f"**Качество:** {track_details.get('quality_name', 'N/A')}\n"
             f"**Артист:** {track_details.get('artist', 'N/A')}\n"
