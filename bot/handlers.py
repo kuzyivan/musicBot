@@ -55,7 +55,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio_file_to_send = None
     cover_file_to_send = None
     files_to_delete = set()
-    track_details = {} # --- Словарь для хранения информации о треке
+    track_details = {}
 
     try:
         sent_message = await update.message.reply_text("⏳ Начинаю поиск...")
@@ -79,7 +79,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if size_mb <= 48:
                 audio_file_to_send = audio_file
                 cover_file_to_send = cover_file
-                track_details['quality_name'] = quality_name # Сохраняем имя качества
+                track_details['quality_name'] = quality_name
                 break
             else:
                 is_last_attempt = (quality_id == list(QUALITY_HIERARCHY.values())[-1])
@@ -93,7 +93,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         files_to_delete.add(converted_file)
                         audio_file_to_send = converted_file
                         cover_file_to_send = cover_file
-                        track_details['quality_name'] = "MP3 (320 kbps)" # Указываем качество MP3
+                        track_details['quality_name'] = "MP3 (320 kbps)"
                     break
 
         if not audio_file_to_send:
@@ -108,7 +108,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="📤 Файл готов, начинается отправка в Telegram..."
         )
 
-        # --- Собираем всю информацию о треке ---
         original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name
         album_folder = audio_file_to_send.parent.name
         
@@ -118,16 +117,11 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             track_details['artist'], track_details['album'], track_details['year'] = "Unknown", "Unknown", "0000"
 
-        # Достаем техническую информацию о качестве из названия папки
-        quality_tech_info = re.search(r"\[(.*?)\]", album_folder)
-        if quality_tech_info:
-            track_details['quality_name'] += f" [{quality_tech_info.group(1)}]"
-
         track_details['title'] = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0]).strip()
         ext = audio_file_to_send.suffix
         custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
 
-        # --- Формируем красивую подпись ---
+        # --- Формируем подпись без технической информации ---
         caption_text = (
             f"**Качество:** {track_details.get('quality_name', 'N/A')}\n"
             f"**Артист:** {track_details.get('artist', 'N/A')}\n"
@@ -141,8 +135,8 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id, 
                 audio=f, 
                 filename=custom_filename,
-                caption=caption_text, # <-- Добавляем подпись
-                parse_mode='Markdown' # Включаем форматирование
+                caption=caption_text,
+                parse_mode='Markdown'
             )
 
         if cover_file_to_send:
