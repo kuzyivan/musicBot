@@ -5,10 +5,27 @@ from services.file_manager import FileManager
 from config import Config
 import logging
 import re
+import subprocess
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Словарь качеств для перебора: от лучшего к худшему
+# --- Функция конвертации ---
+def convert_to_mp3(file_path: Path) -> Path:
+    mp3_path = file_path.with_suffix(".mp3")
+    logger.info(f"Конвертация файла {file_path} в MP3...")
+    try:
+        subprocess.run(
+            ["ffmpeg", "-i", str(file_path), "-b:a", "320k", "-vn", str(mp3_path)],
+            check=True, capture_output=True,
+        )
+        logger.info(f"Файл успешно сконвертирован в {mp3_path}")
+        return mp3_path
+    except Exception as e:
+        logger.error(f"Ошибка конвертации ffmpeg: {e}")
+        return None
+
+# --- Словарь качеств ---
 QUALITY_HIERARCHY = {
     "HI-RES (24-bit < 96kHz)": 7,
     "CD (16-bit)": 6,
@@ -16,25 +33,13 @@ QUALITY_HIERARCHY = {
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎵 Привет! Я могу скачивать треки с Qobuz.\n"
-        "Отправь мне ссылку на трек или используй команду /download <ссылка>"
-    )
+    await update.message.reply_text("🎵 Привет! Я могу скачивать треки с Qobuz.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "/start — приветствие\n"
-        "/download <ссылка> — скачать трек с Qobuz\n"
-        "/help — список команд"
-    )
+    await update.message.reply_text("/start — приветствие\n/download <ссылка> — скачать трек")
 
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = ""
-    if context.args:
-        url = context.args[0]
-    elif update.message and update.message.text:
-        url = update.message.text.strip()
-
+    url = context.args[0] if context.args else getattr(getattr(update, 'message', None), 'text', '').strip()
     if not url:
         await update.message.reply_text("❌ Пожалуйста, укажите ссылку на трек.")
         return
@@ -47,62 +52,67 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     downloader = QobuzDownloader()
     file_manager = FileManager()
     
-    # Переменные для цикла
     audio_file_to_send = None
     cover_file_to_send = None
-    
+    files_to_delete = set()
+
     try:
         sent_message = await update.message.reply_text("⏳ Начинаю поиск...")
         
-        # --- Новая логика: цикл перебора качеств ---
-        for quality_name, quality_id in QUALITY_HIERARCHY.items():
+        # --- Гибридная логика: сначала понижение качества, потом конвертация ---
+        for i, (quality_name, quality_id) in enumerate(QUALITY_HIERARCHY.items()):
             await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=sent_message.message_id,
+                chat_id=chat_id, message_id=sent_message.message_id,
                 text=f"💿 Пробую скачать в качестве: {quality_name}..."
             )
             
             audio_file, cover_file = await downloader.download_track(url, quality_id)
-            
+            if cover_file: files_to_delete.add(cover_file)
+
             if not audio_file:
-                logger.warning(f"Не удалось скачать в качестве {quality_name}. Пробую следующее.")
+                logger.warning(f"Не удалось скачать в качестве {quality_name}.")
                 continue
 
+            files_to_delete.add(audio_file)
             size_mb = file_manager.get_file_size_mb(audio_file)
             
-            if size_mb <= 48: # Оставляем запас до 50 МБ
-                logger.info(f"Файл подходит по размеру ({size_mb:.2f} MB). Отправляем.")
+            if size_mb <= 48:
+                logger.info(f"Файл подходит по размеру ({size_mb:.2f} MB).")
                 audio_file_to_send = audio_file
                 cover_file_to_send = cover_file
-                break # Выходим из цикла, так как нашли подходящий файл
+                break
             else:
-                logger.warning(f"Файл слишком большой ({size_mb:.2f} MB). Пробую качество ниже.")
-                file_manager.safe_remove(audio_file) # Удаляем слишком большой файл
-                if cover_file:
-                    file_manager.safe_remove(cover_file)
-        
-        # --- Конец цикла ---
+                logger.warning(f"Файл слишком большой ({size_mb:.2f} MB).")
+                # Если это последняя попытка и файл все еще большой - конвертируем
+                is_last_attempt = (i == len(QUALITY_HIERARCHY) - 1)
+                if is_last_attempt:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id, message_id=sent_message.message_id,
+                        text=f"🎧 Файл все еще слишком большой ({size_mb:.2f} MB). Конвертирую в MP3..."
+                    )
+                    converted_file = convert_to_mp3(audio_file)
+                    if converted_file:
+                        files_to_delete.add(converted_file)
+                        audio_file_to_send = converted_file
+                        cover_file_to_send = cover_file
+                    break # Выходим из цикла после попытки конвертации
 
         if not audio_file_to_send:
-            logger.error(f"Не удалось скачать файл для {url} с подходящим размером.")
             await context.bot.edit_message_text(
                 chat_id=chat_id, message_id=sent_message.message_id, 
-                text="❌ Не удалось скачать файл. Возможно, даже в самом низком качестве он слишком большой для Telegram."
+                text="❌ Не удалось скачать файл. Возможно, трек слишком длинный."
             )
             return
 
         await context.bot.edit_message_text(
             chat_id=chat_id, message_id=sent_message.message_id,
-            text="📤 Файл скачан, начинается отправка в Telegram..."
+            text="📤 Файл готов, начинается отправка в Telegram..."
         )
 
-        original_name = audio_file_to_send.name
+        original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name # Берем имя от исходника
         album_folder = audio_file_to_send.parent.name
         match = re.match(r"(?P<artist>.+?) - (?P<album>.+?) \((?P<year>\d{4})", album_folder)
-        if match:
-            artist, album, year = match.groups()
-        else:
-            artist, album, year = "Unknown Artist", "Unknown Album", "0000"
+        artist, album, year = match.groups() if match else ("Unknown", "Unknown", "0000")
 
         track_title = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0])
         ext = audio_file_to_send.suffix
@@ -121,9 +131,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Общая ошибка при обработке запроса")
         await update.message.reply_text(f"❌ Произошла ошибка: {e}")
     finally:
-        # Удаляем временные файлы, если они остались
-        if audio_file_to_send:
-            file_manager.safe_remove(audio_file_to_send)
-        if cover_file_to_send:
-            file_manager.safe_remove(cover_file_to_send)
+        logger.info("Очистка временных файлов...")
+        for file_to_delete in files_to_delete:
+            file_manager.safe_remove(file_to_delete)
         logger.info("Временные файлы удалены.")
