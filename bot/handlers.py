@@ -25,6 +25,11 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     chat_id = update.effective_chat.id
 
+    # Проверка на корректность URL
+    if not re.match(r"https?://(www\.)?qobuz\.com/track/.+", url):
+        await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
+        return
+
     downloader = QobuzDownloader()
     file_manager = FileManager()
 
@@ -39,13 +44,13 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             audio_file, cover_file = await downloader.download_track(url, quality=quality)
 
             if not audio_file:
-                continue  # Переход к следующему качеству, если не скачалось
+                continue
 
             size = file_manager.get_file_size_mb(audio_file)
 
             if size <= 50:
                 logger.info(f"✅ Успешно загружено в качестве {quality}, размер: {size:.2f} MB")
-                break  # Файл подходит по размеру
+                break
             else:
                 logger.info(f"⚠️ Качество {quality} слишком большое: {size:.2f} MB — пробуем ниже")
                 file_manager.safe_remove(audio_file)
@@ -56,7 +61,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
             return
 
-        # --- Формируем красивое имя файла ---
         original_name = audio_file.name
         album_folder = audio_file.parent.name
 
@@ -73,7 +77,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         track_title = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0])
         ext = audio_file.suffix
         custom_filename = f"{artist} - {track_title} ({album}, {year}){ext}"
-        # ------------------------------------
 
         try:
             with open(audio_file, 'rb') as f:

@@ -2,6 +2,7 @@ import logging
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 from bot.handlers import start, help_command, handle_download
 from config import Config
+from dotenv import load_dotenv
 
 def setup_logging():
     logging.basicConfig(
@@ -12,6 +13,7 @@ def setup_logging():
     )
 
 def main():
+    load_dotenv()
     setup_logging()
     app = ApplicationBuilder().token(Config.BOT_TOKEN).build()
 
