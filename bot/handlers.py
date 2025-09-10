@@ -28,7 +28,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     logger.info(f"Получен запрос на скачивание: {url}")
 
-    # Добавлена проверка URL
+    # Проверка на корректность URL
     if not re.match(r"https?://(www\.)?qobuz\.com/track/.+", url):
         logger.warning(f"Некорректная ссылка от пользователя {chat_id}: {url}")
         await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
@@ -57,7 +57,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Не удалось скачать в качестве {quality}")
 
         if not audio_file or size > 50:
-            logger.error(f"Не удалось найти подходящий файл для {url}. Последний размер: {size:.2f} MB")
+            logger.error(f"Не удалось получить файл подходящего размера для {url}. Последний размер: {size:.2f} MB")
             await update.message.reply_text("❌ Не удалось получить файл подходящего размера.")
             return
 

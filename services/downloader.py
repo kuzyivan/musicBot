@@ -18,7 +18,8 @@ class QobuzDownloader:
                 str(Config.QOBUZ_DL_PATH),
                 "dl", url,
                 "--no-db",
-                "--quality", quality
+                "--quality", quality,
+                "--output", str(self.download_dir)
             ]
 
             result = subprocess.run(
