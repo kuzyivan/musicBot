@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from config import Config
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,9 @@ class QobuzDownloader:
                 "dl", url,
                 "--no-db",
                 "--quality", quality,
-                "--output", str(self.download_dir)
+                "--output", str(self.download_dir),
+                "--username", os.getenv("QOBUZ_LOGIN"),
+                "--password", os.getenv("QOBUZ_PASSWORD")
             ]
 
             result = subprocess.run(
