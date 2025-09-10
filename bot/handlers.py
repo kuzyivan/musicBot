@@ -32,13 +32,10 @@ QUALITY_HIERARCHY = {
     "MP3 (320 kbps)": 5,
 }
 
-# --- ОБНОВЛЕННАЯ ФУНКЦИЯ START ---
+# --- ОБНОВЛЕННАЯ ФУНКЦИЯ START (БЕЗ СТИКЕРА) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет стикер и приветственное сообщение."""
-    sticker_id = "CAACAgIAAxkBAAJU-2jBsN4mifQD9iCwRMvtinfxfRzcAAJRawACmJHYS9z8QT-kYhXrNgQ"
+    """Отправляет приветственное сообщение."""
     caption_text = "Бот создан для знакомства с музыкой в канале @sondamusic"
-    
-    await context.bot.send_sticker(chat_id=update.effective_chat.id, sticker=sticker_id)
     await update.message.reply_text(caption_text)
 
 
