@@ -1,3 +1,4 @@
+# services/downloader.py
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
@@ -16,12 +17,13 @@ class QobuzDownloader:
         try:
             logger.info(f"Запуск qobuz-dl для URL: {url} с качеством: {quality}")
             cmd = [
-                str(Config.QOBUZ_DL_PATH),  # Правильный путь к исполняемому файлу
+                str(Config.QOBUZ_DL_PATH),
                 "dl", url,
-                "--output", str(self.download_dir),  # Используем --output
+                "--no-db",
                 "--quality", quality,
-                "--username", os.getenv("QOBUZ_LOGIN"), # Используем логин из .env
-                "--password", os.getenv("QOBUZ_PASSWORD") # Используем пароль из .env
+                "--output", str(self.download_dir),
+                "--username", os.getenv("QOBUZ_LOGIN"),
+                "--password", os.getenv("QOBUZ_PASSWORD")
             ]
 
             result = subprocess.run(
