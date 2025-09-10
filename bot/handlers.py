@@ -32,8 +32,15 @@ QUALITY_HIERARCHY = {
     "MP3 (320 kbps)": 5,
 }
 
+# --- ОБНОВЛЕННАЯ ФУНКЦИЯ START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎵 Привет! Я могу скачивать треки с Qobuz.")
+    """Отправляет стикер и приветственное сообщение."""
+    sticker_id = "CAACAgIAAxkBAAJU-2jBsN4mifQD9iCwRMvtinfxfRzcAAJRawACmJHYS9z8QT-kYhXrNgQ"
+    caption_text = "Бот создан для знакомства с музыкой в канале @sondamusic"
+    
+    await context.bot.send_sticker(chat_id=update.effective_chat.id, sticker=sticker_id)
+    await update.message.reply_text(caption_text)
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("/start — приветствие\n/download <ссылка> — скачать трек")
@@ -122,11 +129,12 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
         
         caption_text = (
-            f"**Качество:** {track_details.get('quality_name', 'N/A')}\n"
-            f"**Артист:** {track_details.get('artist', 'N/A')}\n"
-            f"**Трек:** {track_details.get('title', 'N/A')}\n"
-            f"**Альбом:** {track_details.get('album', 'N/A')}\n"
-            f"**Год:** {track_details.get('year', 'N/A')}"
+            f"✨ **Качество:** {track_details.get('quality_name', 'N/A')}\n"
+            f"🎤 **Артист:** `{track_details.get('artist', 'N/A')}`\n"
+            f"🎵 **Трек:** `{track_details.get('title', 'N/A')}`\n"
+            f"💿 **Альбом:** {track_details.get('album', 'N/A')}\n"
+            f"🗓️ **Год:** {track_details.get('year', 'N/A')}\n\n"
+            f"Скачано с [Qobuz]({url})"
         )
         
         with open(audio_file_to_send, 'rb') as f:
