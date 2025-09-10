@@ -35,12 +35,13 @@ class QobuzDownloader:
         original_dir = Path.cwd()
         try:
             logger.info(f"Запуск скачивания для URL: {url} с качеством ID: {quality_id}")
-            # --- Новая логика: устанавливаем качество перед скачиванием ---
             self.client.limit_quality = quality_id
             
             os.chdir(self.download_dir)
             
-            self.client.handle_url(url)
+            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
+            # Добавляем no_db=True, чтобы отключить кэширование
+            self.client.handle_url(url, no_db=True)
 
             audio_file, cover_file = self._find_downloaded_files()
             if audio_file:
