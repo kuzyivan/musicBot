@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from config import Config
 import logging
-from qobuz_dl.core import QobuzDL
+import os  # <-- Добавляем импорт 'os'
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +31,14 @@ class QobuzDownloader:
             logger.error("Клиент Qobuz не инициализирован. Скачивание невозможно.")
             return None, None
             
+        # --- ИЗМЕНЕНИЯ ЗДЕСЬ ---
+        original_dir = Path.cwd()  # Запоминаем текущую директорию
         try:
             logger.info(f"Запуск скачивания для URL: {url}")
+            os.chdir(self.download_dir)  # Переходим в папку для скачивания
             
-            # Вызываем функцию handle_url БЕЗ параметра качества, как в документации
-            self.client.handle_url(
-                url,
-                output_dir=self.download_dir,
-                embed_art=True,
-                no_db=True
-            )
+            # Вызываем функцию handle_url ТОЛЬКО со ссылкой, как в документации
+            self.client.handle_url(url)
 
             audio_file, cover_file = self._find_downloaded_files()
             if audio_file:
@@ -53,11 +51,15 @@ class QobuzDownloader:
             logger.error(f"Ошибка при скачивании через модуль qobuz-dl: {e}")
             logger.exception("Traceback ошибки:")
             return None, None
+        finally:
+            os.chdir(original_dir)  # Возвращаемся в исходную директорию в любом случае
 
     def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
-        for f in self.download_dir.glob("**/*.*"):
+        # Эта функция теперь будет искать файлы в self.download_dir, куда мы перешли
+        for f in Path(".").glob("**/*.*"):
             if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}:
-                audio_file = f
-                cover_file = audio_file.parent / "cover.jpg"
+                # Возвращаем абсолютный путь к файлу
+                audio_file = self.download_dir / f
+                cover_file = self.download_dir / f.parent / "cover.jpg"
                 return audio_file, cover_file if cover_file.exists() else None
         return None, None
