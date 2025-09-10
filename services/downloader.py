@@ -26,7 +26,6 @@ class QobuzDownloader:
 
             result = subprocess.run(
                 cmd,
-                cwd=self.download_dir,
                 capture_output=True,
                 text=True,
                 check=True

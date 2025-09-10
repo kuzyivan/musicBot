@@ -19,7 +19,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_download))
+    app.add_handler(CommandHandler("download", handle_download))
 
     app.run_polling()
 
