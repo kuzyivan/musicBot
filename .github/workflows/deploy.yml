@@ -1,24 +1,4 @@
-name: 🚀 Deploy to VPS
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 📥 Checkout repo
-        uses: actions/checkout@v3
-
-      - name: 🚀 Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
+script: |
             # --- Переменные ---
             APP_DIR="/root/musicBot"
             REPO_URL="https://github.com/kuzyivan/musicBot.git"
@@ -32,7 +12,13 @@ jobs:
             if [ ! -d .git ]; then
               git clone "$REPO_URL" .
             else
-              git pull origin main
+              # --- ИЗМЕНЕННЫЙ БЛОК ---
+              # Принудительно сбрасываем все локальные изменения и обновляемся до последней версии из ветки main
+              git fetch origin main
+              git reset --hard origin/main
+              # Очищаем репозиторий от неотслеживаемых файлов (на всякий случай)
+              git clean -fd
+              # --- КОНЕЦ ИЗМЕНЕННОГО БЛОКА ---
             fi
 
             # --- Создание .env файла из секретов GitHub ---
