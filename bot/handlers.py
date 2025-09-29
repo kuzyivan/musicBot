@@ -112,6 +112,12 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="📤 Файл готов, начинается отправка в Telegram..."
         )
 
+        # --- ИЗВЛЕКАЕМ ТОЧНОЕ КАЧЕСТВО ИЗ ФАЙЛА ---
+        precise_quality = file_manager.get_audio_quality(audio_file_to_send)
+        if precise_quality:
+            track_details['quality_name'] = precise_quality
+        # Если не удалось, останется старое значение из QUALITY_HIERARCHY
+
         original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name
         album_folder = audio_file_to_send.parent.name
         
@@ -125,7 +131,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ext = audio_file_to_send.suffix
         custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
         
-        # --- 1. ИСПРАВЛЕННЫЙ ФОРМАТ ОПИСАНИЯ ---
         caption_text = (
             f"🎤 **Артист:** {track_details.get('artist', 'N/A')}\n"
             f"🎵 **Трек:** {track_details.get('title', 'N/A')}\n"
@@ -134,8 +139,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✨ **Качество:** {track_details.get('quality_name', 'N/A')}"
         )
         
-        # --- 2. ИСПРАВЛЕННАЯ ЛОГИКА ОТПРАВКИ ---
-        # Сначала отправляем аудиофайл без описания
         with open(audio_file_to_send, 'rb') as f:
             await context.bot.send_audio(
                 chat_id=chat_id, 
@@ -143,14 +146,13 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 filename=custom_filename
             )
 
-        # Затем отправляем фото с описанием (если фото есть)
         if cover_file_to_send:
             with open(cover_file_to_send, 'rb') as img:
                 await context.bot.send_photo(
                     chat_id=chat_id,
                     photo=img,
                     caption=caption_text,
-                    parse_mode='Markdown' # Используем Markdown для жирного шрифта
+                    parse_mode='Markdown'
                 )
         
         await context.bot.delete_message(chat_id, sent_message.message_id)
