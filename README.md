@@ -19,7 +19,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # и заполни значения
 
-#new
+#new-1
 
 
 
