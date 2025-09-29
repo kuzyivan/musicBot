@@ -125,41 +125,32 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ext = audio_file_to_send.suffix
         custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
         
+        # --- 1. ИСПРАВЛЕННЫЙ ФОРМАТ ОПИСАНИЯ ---
         caption_text = (
-            f"✨ **Качество:** {track_details.get('quality_name', 'N/A')}\n"
-            f"🎤 **Артист:** `{track_details.get('artist', 'N/A')}`\n"
-            f"🎵 **Трек:** `{track_details.get('title', 'N/A')}`\n"
+            f"🎤 **Артист:** {track_details.get('artist', 'N/A')}\n"
+            f"🎵 **Трек:** {track_details.get('title', 'N/A')}\n"
             f"💿 **Альбом:** {track_details.get('album', 'N/A')}\n"
             f"🗓️ **Год:** {track_details.get('year', 'N/A')}\n\n"
-            f"Скачано с [Qobuz]({url})"
+            f"✨ **Качество:** {track_details.get('quality_name', 'N/A')}"
         )
         
-        # --- ИЗМЕНЕННАЯ ЛОГИКА ОТПРАВКИ ---
+        # --- 2. ИСПРАВЛЕННАЯ ЛОГИКА ОТПРАВКИ ---
+        # Сначала отправляем аудиофайл без описания
+        with open(audio_file_to_send, 'rb') as f:
+            await context.bot.send_audio(
+                chat_id=chat_id, 
+                audio=f, 
+                filename=custom_filename
+            )
+
+        # Затем отправляем фото с описанием (если фото есть)
         if cover_file_to_send:
-            # Если есть обложка, сначала отправляем аудиофайл без описания
-            with open(audio_file_to_send, 'rb') as f:
-                await context.bot.send_audio(
-                    chat_id=chat_id, 
-                    audio=f, 
-                    filename=custom_filename
-                )
-            # Затем отправляем фото с описанием
             with open(cover_file_to_send, 'rb') as img:
                 await context.bot.send_photo(
                     chat_id=chat_id,
                     photo=img,
                     caption=caption_text,
-                    parse_mode='Markdown'
-                )
-        else:
-            # Если обложки нет, отправляем аудиофайл с описанием
-            with open(audio_file_to_send, 'rb') as f:
-                await context.bot.send_audio(
-                    chat_id=chat_id, 
-                    audio=f, 
-                    filename=custom_filename,
-                    caption=caption_text,
-                    parse_mode='Markdown'
+                    parse_mode='Markdown' # Используем Markdown для жирного шрифта
                 )
         
         await context.bot.delete_message(chat_id, sent_message.message_id)
