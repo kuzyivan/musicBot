@@ -134,18 +134,33 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Скачано с [Qobuz]({url})"
         )
         
-        with open(audio_file_to_send, 'rb') as f:
-            await context.bot.send_audio(
-                chat_id=chat_id, 
-                audio=f, 
-                filename=custom_filename,
-                caption=caption_text,
-                parse_mode='Markdown'
-            )
-
+        # --- ИЗМЕНЕННАЯ ЛОГИКА ОТПРАВКИ ---
         if cover_file_to_send:
+            # Если есть обложка, сначала отправляем аудиофайл без описания
+            with open(audio_file_to_send, 'rb') as f:
+                await context.bot.send_audio(
+                    chat_id=chat_id, 
+                    audio=f, 
+                    filename=custom_filename
+                )
+            # Затем отправляем фото с описанием
             with open(cover_file_to_send, 'rb') as img:
-                await context.bot.send_photo(chat_id, img)
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=img,
+                    caption=caption_text,
+                    parse_mode='Markdown'
+                )
+        else:
+            # Если обложки нет, отправляем аудиофайл с описанием
+            with open(audio_file_to_send, 'rb') as f:
+                await context.bot.send_audio(
+                    chat_id=chat_id, 
+                    audio=f, 
+                    filename=custom_filename,
+                    caption=caption_text,
+                    parse_mode='Markdown'
+                )
         
         await context.bot.delete_message(chat_id, sent_message.message_id)
 
