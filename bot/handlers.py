@@ -112,11 +112,9 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="📤 Файл готов, начинается отправка в Telegram..."
         )
 
-        # --- ИЗВЛЕКАЕМ ТОЧНОЕ КАЧЕСТВО ИЗ ФАЙЛА ---
         precise_quality = file_manager.get_audio_quality(audio_file_to_send)
         if precise_quality:
             track_details['quality_name'] = precise_quality
-        # Если не удалось, останется старое значение из QUALITY_HIERARCHY
 
         original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name
         album_folder = audio_file_to_send.parent.name
@@ -131,12 +129,14 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ext = audio_file_to_send.suffix
         custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
         
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
         caption_text = (
             f"🎤 **Артист:** {track_details.get('artist', 'N/A')}\n"
             f"🎵 **Трек:** {track_details.get('title', 'N/A')}\n"
             f"💿 **Альбом:** {track_details.get('album', 'N/A')}\n"
             f"🗓️ **Год:** {track_details.get('year', 'N/A')}\n\n"
-            f"✨ **Качество:** {track_details.get('quality_name', 'N/A')}"
+            f"✨ **Качество:** {track_details.get('quality_name', 'N/A')}\n\n"
+            f"Скачано с [Qobuz]({url})"
         )
         
         with open(audio_file_to_send, 'rb') as f:
