@@ -8,33 +8,46 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Optional
-from mutagen.flac import FLAC, Picture # Импортируем mutagen для FLAC
+import mutagen
+from mutagen.flac import Picture
+from mutagen.id3 import APIC
 
 logger = logging.getLogger(__name__)
 
-# --- Новая функция для встраивания обложки ---
-def embed_cover_art(audio_path: Path, cover_path: Path):
-    if not audio_path or not cover_path or not audio_path.exists() or not cover_path.exists():
+# --- ОБНОВЛЕНА АННОТАЦИЯ ТИПА ---
+def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
+    if not all([audio_path, cover_path, audio_path.exists(), cover_path.exists()]):
+        logger.warning("Аудиофайл или обложка не найдены, встраивание невозможно.")
         return
-    
+
     logger.info(f"Встраивание обложки {cover_path} в файл {audio_path}...")
     try:
-        if audio_path.suffix == '.flac':
-            audio = FLAC(audio_path)
-            audio.clear_pictures()
+        with open(cover_path, "rb") as f:
+            artwork_data = f.read()
+
+        audio = mutagen.File(audio_path, easy=False)
+        if audio is None:
+            raise ValueError("Не удалось распознать аудиофайл.")
+
+        if "audio/flac" in audio.mime:
             pic = Picture()
-            with open(cover_path, 'rb') as f:
-                pic.data = f.read()
-            pic.type = 3  # Front cover
+            pic.data = artwork_data
+            pic.type = 3
             pic.mime = 'image/jpeg'
             audio.add_picture(pic)
-            audio.save()
             logger.info("Обложка успешно встроена во FLAC.")
-        # Для MP3 встраивание происходит на этапе конвертации
+        elif "audio/mpeg" in audio.mime:
+            audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=artwork_data))
+            logger.info("Обложка успешно встроена в MP3.")
+        else:
+            logger.warning(f"Встраивание обложки для типа {audio.mime[0]} не поддерживается.")
+
+        audio.save()
     except Exception as e:
         logger.error(f"Не удалось встроить обложку с помощью mutagen: {e}")
 
-# --- Обновленная функция конвертации, которая также копирует обложку ---
+# ... (остальной код файла остается без изменений, я привожу его для полноты)
+
 def convert_to_mp3(file_path: Path) -> Optional[Path]:
     mp3_path = file_path.with_suffix(".mp3")
     logger.info(f"Конвертация файла {file_path} в MP3 с сохранением обложки...")
@@ -50,7 +63,6 @@ def convert_to_mp3(file_path: Path) -> Optional[Path]:
         logger.error(f"Ошибка конвертации ffmpeg: {e}")
         return None
 
-# --- Словарь качеств ---
 QUALITY_HIERARCHY = { "HI-RES (Max)": 27, "CD (16-bit)": 6, "MP3 (320 kbps)": 5 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61,10 +73,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.args[0] if context.args else getattr(getattr(update, 'message', None), 'text', '').strip()
-    # ... (проверки url остаются такими же)
+    if not url:
+        await update.message.reply_text("❌ Пожалуйста, укажите ссылку на трек.")
+        return
 
     chat_id = update.effective_chat.id
-    # ... (проверки url остаются такими же)
+    if not re.match(r"https?://(www\.|open\.|play\.)?qobuz\.com/(.+)", url):
+        await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
+        return
 
     downloader = QobuzDownloader()
     file_manager = FileManager()
@@ -84,11 +100,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not audio_file: continue
 
             files_to_delete.add(audio_file)
-
-            # --- ИЗМЕНЕНИЕ: Встраиваем обложку сразу после скачивания ---
-            if audio_file and cover_file:
-                embed_cover_art(audio_file, cover_file)
-
+            embed_cover_art(audio_file, cover_file)
             size_mb = file_manager.get_file_size_mb(audio_file)
             
             if size_mb <= 48:
@@ -100,6 +112,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
                     converted_file = convert_to_mp3(audio_file)
                     if converted_file:
+                        embed_cover_art(converted_file, cover_file)
                         files_to_delete.add(converted_file)
                         audio_file_to_send, cover_file_to_send, track_details['quality_name'] = converted_file, cover_file, "MP3 (320 kbps)"
                     break
@@ -108,7 +121,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="❌ Не удалось скачать файл. Возможно, трек слишком длинный.")
             return
 
-        # ... (весь остальной код, включая формирование подписи и отправку, остается БЕЗ ИЗМЕНЕНИЙ)
         await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="📤 Файл готов, начинается отправка...")
 
         original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name
@@ -149,7 +161,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode='Markdown'
                 )
         
-        await context.bot.delete_message(chat_id, sent_message.message_id)
+        await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
 
     except Exception as e:
         logger.exception("Общая ошибка при обработке запроса")
