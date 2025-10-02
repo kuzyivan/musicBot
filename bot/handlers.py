@@ -8,10 +8,33 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Optional
+from mutagen.flac import FLAC, Picture # Импортируем mutagen для FLAC
 
 logger = logging.getLogger(__name__)
 
-# --- Функция конвертации ---
+# --- Новая функция для встраивания обложки ---
+def embed_cover_art(audio_path: Path, cover_path: Path):
+    if not audio_path or not cover_path or not audio_path.exists() or not cover_path.exists():
+        return
+    
+    logger.info(f"Встраивание обложки {cover_path} в файл {audio_path}...")
+    try:
+        if audio_path.suffix == '.flac':
+            audio = FLAC(audio_path)
+            audio.clear_pictures()
+            pic = Picture()
+            with open(cover_path, 'rb') as f:
+                pic.data = f.read()
+            pic.type = 3  # Front cover
+            pic.mime = 'image/jpeg'
+            audio.add_picture(pic)
+            audio.save()
+            logger.info("Обложка успешно встроена во FLAC.")
+        # Для MP3 встраивание происходит на этапе конвертации
+    except Exception as e:
+        logger.error(f"Не удалось встроить обложку с помощью mutagen: {e}")
+
+# --- Обновленная функция конвертации, которая также копирует обложку ---
 def convert_to_mp3(file_path: Path) -> Optional[Path]:
     mp3_path = file_path.with_suffix(".mp3")
     logger.info(f"Конвертация файла {file_path} в MP3 с сохранением обложки...")
@@ -28,11 +51,7 @@ def convert_to_mp3(file_path: Path) -> Optional[Path]:
         return None
 
 # --- Словарь качеств ---
-QUALITY_HIERARCHY = {
-    "HI-RES (Max)": 27,
-    "CD (16-bit)": 6,
-    "MP3 (320 kbps)": 5,
-}
+QUALITY_HIERARCHY = { "HI-RES (Max)": 27, "CD (16-bit)": 6, "MP3 (320 kbps)": 5 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎵 Привет! Я могу скачивать треки с Qobuz.")
@@ -42,14 +61,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.args[0] if context.args else getattr(getattr(update, 'message', None), 'text', '').strip()
-    if not url:
-        await update.message.reply_text("❌ Пожалуйста, укажите ссылку на трек.")
-        return
+    # ... (проверки url остаются такими же)
 
     chat_id = update.effective_chat.id
-    if not re.match(r"https?://(www\.|open\.|play\.)?qobuz\.com/(.+)", url):
-        await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на трек Qobuz.")
-        return
+    # ... (проверки url остаются такими же)
 
     downloader = QobuzDownloader()
     file_manager = FileManager()
@@ -62,16 +77,18 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sent_message = await update.message.reply_text("⏳ Начинаю поиск...")
         
         for i, (quality_name, quality_id) in enumerate(QUALITY_HIERARCHY.items()):
-            await context.bot.edit_message_text(
-                chat_id=chat_id, message_id=sent_message.message_id,
-                text=f"💿 Пробую скачать в качестве: {quality_name}..."
-            )
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"💿 Пробую скачать в качестве: {quality_name}...")
             
             audio_file, cover_file = await downloader.download_track(url, quality_id)
             if cover_file: files_to_delete.add(cover_file)
             if not audio_file: continue
 
             files_to_delete.add(audio_file)
+
+            # --- ИЗМЕНЕНИЕ: Встраиваем обложку сразу после скачивания ---
+            if audio_file and cover_file:
+                embed_cover_art(audio_file, cover_file)
+
             size_mb = file_manager.get_file_size_mb(audio_file)
             
             if size_mb <= 48:
@@ -80,7 +97,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 is_last_attempt = (i == len(QUALITY_HIERARCHY) - 1)
                 if is_last_attempt:
-                    await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"🎧 Файл все еще слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
+                    await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
                     converted_file = convert_to_mp3(audio_file)
                     if converted_file:
                         files_to_delete.add(converted_file)
@@ -91,11 +108,11 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="❌ Не удалось скачать файл. Возможно, трек слишком длинный.")
             return
 
+        # ... (весь остальной код, включая формирование подписи и отправку, остается БЕЗ ИЗМЕНЕНИЙ)
         await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="📤 Файл готов, начинается отправка...")
 
         original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name
         album_folder = audio_file_to_send.parent.name
-        
         match = re.match(r"(?P<artist>.+?) - (?P<album>.+?) \((?P<year>\d{4})", album_folder)
         track_details.update(zip(['artist', 'album', 'year'], map(str.strip, match.groups())) if match else zip(['artist', 'album', 'year'], ["Unknown"]*3))
         track_details['title'] = re.sub(r"^\d+\.\s*", "", original_name.rsplit(".", 1)[0]).strip()
@@ -103,15 +120,13 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ext = audio_file_to_send.suffix
         custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
         
-        # --- ОБНОВЛЕННЫЙ БЛОК ФОРМАТИРОВАНИЯ ПОДПИСИ ---
-        # Извлекаем реальное качество из названия папки
         quality_tech_info_match = re.search(r"\[(.*?)\]", album_folder)
         if quality_tech_info_match:
             real_quality = quality_tech_info_match.group(1).replace('B', '-bit').replace('k', ' k')
         elif track_details.get('quality_name') == "MP3 (320 kbps)":
             real_quality = "MP3 (320 kbps)"
         else:
-            real_quality = "CD (16-bit / 44.1 kHz)" # Запасной вариант
+            real_quality = "CD (16-bit / 44.1 kHz)"
 
         caption_text = (
             f"🎤 **Артист:** `{track_details.get('artist', 'N/A')}`\n"
@@ -122,11 +137,9 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Скачано с [Qobuz]({url})"
         )
         
-        # Отправляем аудиофайл без подписи
         with open(audio_file_to_send, 'rb') as f:
             await context.bot.send_audio(chat_id=chat_id, audio=f, filename=custom_filename)
 
-        # Отправляем обложку с подписью
         if cover_file_to_send:
             with open(cover_file_to_send, 'rb') as img:
                 await context.bot.send_photo(

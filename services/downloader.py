@@ -35,15 +35,12 @@ class QobuzDownloader:
         original_dir = Path.cwd()
         try:
             logger.info(f"Запуск скачивания для URL: {url} с качеством ID: {quality_id}")
-            # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-            # Устанавливаем все параметры как свойства клиента
             self.client.limit_quality = quality_id
             self.client.no_db = True
-            self.client.embed_art = True
             
             os.chdir(self.download_dir)
             
-            # Вызываем функцию handle_url ТОЛЬКО со ссылкой
+            # Убрали embed_art=True, так как будем делать это вручную
             self.client.handle_url(url)
 
             audio_file, cover_file = self._find_downloaded_files()
