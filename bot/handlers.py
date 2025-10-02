@@ -8,46 +8,43 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Optional
-import mutagen
-from mutagen.flac import Picture
-from mutagen.id3 import APIC
+import shutil # Импортируем shutil для переименования файлов
 
 logger = logging.getLogger(__name__)
 
-# --- ОБНОВЛЕНА АННОТАЦИЯ ТИПА ---
+# --- НОВАЯ, НАДЕЖНАЯ ФУНКЦИЯ ВСТРАИВАНИЯ ОБЛОЖКИ ЧЕРЕЗ FFMPEG ---
 def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
     if not all([audio_path, cover_path, audio_path.exists(), cover_path.exists()]):
         logger.warning("Аудиофайл или обложка не найдены, встраивание невозможно.")
         return
 
-    logger.info(f"Встраивание обложки {cover_path} в файл {audio_path}...")
+    logger.info(f"Встраивание обложки {cover_path} в файл {audio_path} с помощью ffmpeg...")
+    temp_output_path = audio_path.with_suffix(f".temp{audio_path.suffix}")
+
     try:
-        with open(cover_path, "rb") as f:
-            artwork_data = f.read()
+        command = [
+            "ffmpeg",
+            "-i", str(audio_path),      # Входной аудиофайл
+            "-i", str(cover_path),      # Входная обложка
+            "-map", "0:a",              # Выбрать все аудиодорожки из первого входа
+            "-map", "1:v",              # Выбрать все видеодорожки (обложку) из второго входа
+            "-c", "copy",               # Копировать все потоки без перекодирования
+            "-disposition:v:0", "attached_pic", # Установить флаг обложки
+            "-id3v2_version", "3",      # Для максимальной совместимости
+            str(temp_output_path)
+        ]
+        subprocess.run(command, check=True, capture_output=True)
 
-        audio = mutagen.File(audio_path, easy=False)
-        if audio is None:
-            raise ValueError("Не удалось распознать аудиофайл.")
-
-        if "audio/flac" in audio.mime:
-            pic = Picture()
-            pic.data = artwork_data
-            pic.type = 3
-            pic.mime = 'image/jpeg'
-            audio.add_picture(pic)
-            logger.info("Обложка успешно встроена во FLAC.")
-        elif "audio/mpeg" in audio.mime:
-            audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=artwork_data))
-            logger.info("Обложка успешно встроена в MP3.")
-        else:
-            logger.warning(f"Встраивание обложки для типа {audio.mime[0]} не поддерживается.")
-
-        audio.save()
+        # Заменяем исходный файл новым, с встроенной обложкой
+        shutil.move(str(temp_output_path), str(audio_path))
+        logger.info("Обложка успешно встроена с помощью ffmpeg.")
     except Exception as e:
-        logger.error(f"Не удалось встроить обложку с помощью mutagen: {e}")
+        logger.error(f"Не удалось встроить обложку с помощью ffmpeg: {e}")
+        # Если что-то пошло не так, удаляем временный файл, если он создался
+        if temp_output_path.exists():
+            temp_output_path.unlink()
 
-# ... (остальной код файла остается без изменений, я привожу его для полноты)
-
+# --- Функция конвертации остается без изменений ---
 def convert_to_mp3(file_path: Path) -> Optional[Path]:
     mp3_path = file_path.with_suffix(".mp3")
     logger.info(f"Конвертация файла {file_path} в MP3 с сохранением обложки...")
@@ -63,6 +60,7 @@ def convert_to_mp3(file_path: Path) -> Optional[Path]:
         logger.error(f"Ошибка конвертации ffmpeg: {e}")
         return None
 
+# --- Остальной код остается без изменений ---
 QUALITY_HIERARCHY = { "HI-RES (Max)": 27, "CD (16-bit)": 6, "MP3 (320 kbps)": 5 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -100,7 +98,8 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not audio_file: continue
 
             files_to_delete.add(audio_file)
-            embed_cover_art(audio_file, cover_file)
+            embed_cover_art(audio_file, cover_file) # Вызываем нашу новую ffmpeg-функцию
+            
             size_mb = file_manager.get_file_size_mb(audio_file)
             
             if size_mb <= 48:
@@ -110,9 +109,8 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 is_last_attempt = (i == len(QUALITY_HIERARCHY) - 1)
                 if is_last_attempt:
                     await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
-                    converted_file = convert_to_mp3(audio_file)
+                    converted_file = convert_to_mp3(audio_file) # ffmpeg для конвертации уже умеет копировать обложку
                     if converted_file:
-                        embed_cover_art(converted_file, cover_file)
                         files_to_delete.add(converted_file)
                         audio_file_to_send, cover_file_to_send, track_details['quality_name'] = converted_file, cover_file, "MP3 (320 kbps)"
                     break
