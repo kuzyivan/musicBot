@@ -7,11 +7,12 @@ import logging
 import re
 import subprocess
 from pathlib import Path
+from typing import Optional # <-- 1. ДОБАВЛЕН ИМПОРТ 'OPTIONAL'
 
 logger = logging.getLogger(__name__)
 
 # --- Функция конвертации ---
-def convert_to_mp3(file_path: Path) -> Path:
+def convert_to_mp3(file_path: Path) -> Optional[Path]: # <-- 2. ИЗМЕНЕН ТИП ВОЗВРАТА
     mp3_path = file_path.with_suffix(".mp3")
     logger.info(f"Конвертация файла {file_path} в MP3...")
     try:
@@ -25,6 +26,7 @@ def convert_to_mp3(file_path: Path) -> Path:
         logger.error(f"Ошибка конвертации ffmpeg: {e}")
         return None
 
+# ... (весь остальной код файла остается без изменений) ...
 # --- Словарь качеств ---
 QUALITY_HIERARCHY = {
     "HI-RES (Max)": 27,
@@ -139,7 +141,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
 
-        # --- ВОЗВРАЩАЕМ БЛОК ОТПРАВКИ ОБЛОЖКИ ---
         if cover_file_to_send:
             with open(cover_file_to_send, 'rb') as img:
                 await context.bot.send_photo(chat_id, img)
