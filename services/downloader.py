@@ -35,9 +35,11 @@ class QobuzDownloader:
         original_dir = Path.cwd()
         try:
             logger.info(f"Запуск скачивания для URL: {url} с качеством ID: {quality_id}")
-            # Устанавливаем желаемое качество и отключаем кеширование через свойства клиента
+            # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+            # Устанавливаем все параметры как свойства клиента
             self.client.limit_quality = quality_id
             self.client.no_db = True
+            self.client.embed_art = True
             
             os.chdir(self.download_dir)
             
