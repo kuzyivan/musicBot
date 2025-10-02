@@ -7,26 +7,36 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional # <-- 1. ДОБАВЛЕН ИМПОРТ 'OPTIONAL'
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# --- Функция конвертации ---
-def convert_to_mp3(file_path: Path) -> Optional[Path]: # <-- 2. ИЗМЕНЕН ТИП ВОЗВРАТА
+# --- ОБНОВЛЕННАЯ ФУНКЦИЯ КОНВЕРТАЦИИ ---
+def convert_to_mp3(file_path: Path) -> Optional[Path]:
     mp3_path = file_path.with_suffix(".mp3")
-    logger.info(f"Конвертация файла {file_path} в MP3...")
+    logger.info(f"Конвертация файла {file_path} в MP3 с сохранением обложки...")
     try:
-        subprocess.run(
-            ["ffmpeg", "-i", str(file_path), "-b:a", "320k", "-vn", str(mp3_path)],
-            check=True, capture_output=True,
-        )
+        # Новая команда ffmpeg, которая копирует обложку
+        command = [
+            "ffmpeg",
+            "-i", str(file_path),    # Входной файл
+            "-map", "0:a:0",         # Выбрать первую аудиодорожку
+            "-b:a", "320k",          # Битрейт аудио
+            "-map", "0:v?",          # Выбрать видеодорожку (обложку), если она есть
+            "-c:v", "copy",          # Копировать видеодорожку без перекодирования
+            "-id3v2_version", "3",   # Для лучшей совместимости обложек
+            str(mp3_path),
+        ]
+        subprocess.run(command, check=True, capture_output=True)
         logger.info(f"Файл успешно сконвертирован в {mp3_path}")
         return mp3_path
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Ошибка конвертации ffmpeg: {e.stderr.decode()}")
+        return None
     except Exception as e:
-        logger.error(f"Ошибка конвертации ffmpeg: {e}")
+        logger.error(f"Непредвиденная ошибка при конвертации: {e}")
         return None
 
-# ... (весь остальной код файла остается без изменений) ...
 # --- Словарь качеств ---
 QUALITY_HIERARCHY = {
     "HI-RES (Max)": 27,
