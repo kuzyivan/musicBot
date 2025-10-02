@@ -32,12 +32,8 @@ QUALITY_HIERARCHY = {
     "MP3 (320 kbps)": 5,
 }
 
-# --- ОБНОВЛЕННАЯ ФУНКЦИЯ START (БЕЗ СТИКЕРА) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет приветственное сообщение."""
-    caption_text = "Бот создан для знакомства с музыкой в канале @sondamusic"
-    await update.message.reply_text(caption_text)
-
+    await update.message.reply_text("🎵 Привет! Я могу скачивать треки с Qobuz.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("/start — приветствие\n/download <ссылка> — скачать трек")
@@ -112,10 +108,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="📤 Файл готов, начинается отправка в Telegram..."
         )
 
-        precise_quality = file_manager.get_audio_quality(audio_file_to_send)
-        if precise_quality:
-            track_details['quality_name'] = precise_quality
-
         original_name = Path(str(audio_file_to_send).replace(".mp3", ".flac")).name
         album_folder = audio_file_to_send.parent.name
         
@@ -129,13 +121,12 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ext = audio_file_to_send.suffix
         custom_filename = f"{track_details['artist']} - {track_details['title']} ({track_details['album']}, {track_details['year']}){ext}"
         
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
         caption_text = (
-            f"🎤 **Артист:** {track_details.get('artist', 'N/A')}\n"
-            f"🎵 **Трек:** {track_details.get('title', 'N/A')}\n"
+            f"✨ **Качество:** {track_details.get('quality_name', 'N/A')}\n"
+            f"🎤 **Артист:** `{track_details.get('artist', 'N/A')}`\n"
+            f"🎵 **Трек:** `{track_details.get('title', 'N/A')}`\n"
             f"💿 **Альбом:** {track_details.get('album', 'N/A')}\n"
             f"🗓️ **Год:** {track_details.get('year', 'N/A')}\n\n"
-            f"✨ **Качество:** {track_details.get('quality_name', 'N/A')}\n\n"
             f"Скачано с [Qobuz]({url})"
         )
         
@@ -143,17 +134,15 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_audio(
                 chat_id=chat_id, 
                 audio=f, 
-                filename=custom_filename
+                filename=custom_filename,
+                caption=caption_text,
+                parse_mode='Markdown'
             )
 
+        # --- ВОЗВРАЩАЕМ БЛОК ОТПРАВКИ ОБЛОЖКИ ---
         if cover_file_to_send:
             with open(cover_file_to_send, 'rb') as img:
-                await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=img,
-                    caption=caption_text,
-                    parse_mode='Markdown'
-                )
+                await context.bot.send_photo(chat_id, img)
         
         await context.bot.delete_message(chat_id, sent_message.message_id)
 
