@@ -50,7 +50,13 @@ def convert_to_mp3(file_path: Path) -> Optional[Path]:
         logger.error(f"❌ Ошибка конвертации ffmpeg: {e.stderr.decode()}")
         return None
 
-QUALITY_HIERARCHY = { "HI-RES (Max)": 27, "CD (16-bit)": 6, "MP3 (320 kbps)": 5 }
+# --- ОБНОВЛЕННЫЙ СЛОВАРЬ КАЧЕСТВ ---
+QUALITY_HIERARCHY = {
+    "HI-RES (Max >96kHz)": 27,
+    "HI-RES (<96kHz)": 7,
+    "CD (16-bit)": 6,
+    "MP3 (320 kbps)": 5,
+}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎵 Привет! Я могу скачивать треки с Qobuz.")
