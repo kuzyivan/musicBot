@@ -20,14 +20,16 @@ def setup_logging():
 def main():
     load_dotenv()
     setup_logging()
+    
+    logger = logging.getLogger(__name__)
+    logger.info("🚀 Запуск бота...")
+    
     app = ApplicationBuilder().token(Config.BOT_TOKEN).build()
 
-    # Команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("download", handle_download))
     
-    # Обработчики сообщений
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.Regex(r"qobuz\.com/"), 
         handle_download

@@ -14,40 +14,39 @@ import shutil
 logger = logging.getLogger(__name__)
 
 def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ: Упрощаем проверку для Pylance ---
-    if not cover_path or not cover_path.exists() or not audio_path or not audio_path.exists():
-        logger.warning("Аудиофайл или обложка не найдены, встраивание невозможно.")
+    if not all([audio_path, cover_path, audio_path.exists(), cover_path.exists()]):
         return
-
-    logger.info(f"Встраивание обложки {cover_path} в файл {audio_path} с помощью ffmpeg...")
+    logger.info(f"🖼️ Встраивание обложки {cover_path.name} в файл {audio_path.name}...")
     temp_output_path = audio_path.with_suffix(f".temp{audio_path.suffix}")
-
     try:
         command = [
             "ffmpeg", "-i", str(audio_path), "-i", str(cover_path), "-map", "0:a",
             "-map", "1:v", "-c", "copy", "-disposition:v:0", "attached_pic",
             "-id3v2_version", "3", str(temp_output_path)
         ]
-        subprocess.run(command, check=True, capture_output=True)
+        subprocess.run(command, check=True, capture_output=True, stderr=subprocess.PIPE)
         shutil.move(str(temp_output_path), str(audio_path))
-        logger.info("Обложка успешно встроена с помощью ffmpeg.")
+        logger.info("✅ Обложка успешно встроена.")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ Не удалось встроить обложку с помощью ffmpeg: {e.stderr.decode()}")
     except Exception as e:
-        logger.error(f"Не удалось встроить обложку с помощью ffmpeg: {e}")
+        logger.error(f"❌ Не удалось встроить обложку: {e}")
+    finally:
         if temp_output_path.exists(): temp_output_path.unlink()
 
 def convert_to_mp3(file_path: Path) -> Optional[Path]:
     mp3_path = file_path.with_suffix(".mp3")
-    logger.info(f"Конвертация файла {file_path} в MP3 с сохранением обложки...")
+    logger.info(f"🎵 Конвертация файла {file_path.name} в MP3...")
     try:
         command = [
             "ffmpeg", "-i", str(file_path), "-map", "0:a:0", "-b:a", "320k",
             "-map", "0:v?", "-c:v", "copy", "-id3v2_version", "3", str(mp3_path),
         ]
-        subprocess.run(command, check=True, capture_output=True)
-        logger.info(f"Файл успешно сконвертирован в {mp3_path}")
+        subprocess.run(command, check=True, capture_output=True, stderr=subprocess.PIPE)
+        logger.info(f"✅ Файл успешно сконвертирован в {mp3_path.name}")
         return mp3_path
-    except Exception as e:
-        logger.error(f"Ошибка конвертации ffmpeg: {e}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ Ошибка конвертации ffmpeg: {e.stderr.decode()}")
         return None
 
 QUALITY_HIERARCHY = { "HI-RES (Max)": 27, "CD (16-bit)": 6, "MP3 (320 kbps)": 5 }
@@ -92,7 +91,7 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
         await handle_download(update, context)
 
     except Exception as e:
-        logger.error(f"Ошибка в процессе распознавания: {e}")
+        logger.error(f"❌ Ошибка в процессе распознавания: {e}")
         await sent_message.edit_text("❌ Произошла непредвиденная ошибка во время распознавания.")
     finally:
         if temp_file_path and temp_file_path.exists():
@@ -174,10 +173,10 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
 
     except Exception as e:
-        logger.exception("Общая ошибка при обработке запроса")
+        logger.exception(f"❌ Общая ошибка при обработке запроса: {e}")
         await update.message.reply_text(f"❌ Произошла ошибка: {e}")
     finally:
-        logger.info("Очистка временных файлов...")
+        logger.info("🗑️ Очистка временных файлов...")
         for file_to_delete in files_to_delete:
             file_manager.safe_remove(file_to_delete)
-        logger.info("Временные файлы удалены.")
+        logger.info("✅ Временные файлы удалены.")
