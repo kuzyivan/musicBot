@@ -3,8 +3,8 @@ python-telegram-bot==20.7
 qobuz-dl==0.9.9.10
 pydub
 python-dotenv
-audd-api
-
+#audd-api
+./aaudd-4.0-py3-none-any.whl
 # --- Вспомогательные библиотеки (pip подберет совместимые версии) ---
 anyio
 beautifulsoup4
