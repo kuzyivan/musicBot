@@ -19,7 +19,6 @@ def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
     logger.info(f"🖼️ Встраивание обложки {cover_path.name} в файл {audio_path.name}...")
     temp_output_path = audio_path.with_suffix(f".temp{audio_path.suffix}")
     try:
-        # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: Убираем конфликтующие параметры ---
         command = [
             "ffmpeg", "-i", str(audio_path), "-i", str(cover_path), "-map", "0:a",
             "-map", "1:v", "-c", "copy", "-disposition:v:0", "attached_pic",
