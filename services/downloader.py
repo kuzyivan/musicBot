@@ -17,6 +17,7 @@ class QobuzDownloader:
         logger.info("Сервис загрузки Qobuz (CLI) инициализирован.")
 
     def search_track(self, artist: str, title: str) -> Optional[str]:
+        # ... (этот метод остается без изменений) ...
         query = f"{artist} {title}"
         logger.info(f"Поиск на Qobuz через CLI 'lucky' по запросу: '{query}'")
         try:
@@ -25,17 +26,21 @@ class QobuzDownloader:
 
             command = [str(qobuz_dl_path), "lucky", query, "--type", "track"]
             result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            
+            # Добавляем подробное логирование
+            if result.stdout:
+                logger.info(f"Вывод 'qobuz-dl lucky' (stdout):\n{result.stdout}")
+            if result.stderr:
+                logger.warning(f"Вывод 'qobuz-dl lucky' (stderr):\n{result.stderr}")
 
-            # Проверяем stderr на наличие ошибки аутентификации
             if "Invalid credentials" in result.stderr:
                 logger.error("Ошибка аутентификации Qobuz. Пожалуйста, выполните 'qobuz-dl -r' на сервере.")
                 return None
             if result.returncode != 0:
-                logger.error(f"Команда 'qobuz-dl lucky' завершилась с ошибкой: {result.stderr}")
+                logger.error(f"Команда 'qobuz-dl lucky' завершилась с кодом {result.returncode}.")
                 return None
 
-            output = result.stdout
-            match = re.search(r"(https?://open\.qobuz\.com/track/\d+)", output)
+            match = re.search(r"(https?://open\.qobuz\.com/track/\d+)", result.stdout)
             if match:
                 url = match.group(1)
                 logger.info(f"Найдена ссылка на трек: {url}")
@@ -66,11 +71,18 @@ class QobuzDownloader:
             ]
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
 
+            # --- ИЗМЕНЕНИЕ ЗДЕСЬ: ДОБАВЛЯЕМ ПОДРОБНОЕ ЛОГИРОВАНИЕ ---
+            if result.stdout:
+                logger.info(f"Вывод 'qobuz-dl dl' (stdout):\n{result.stdout}")
+            if result.stderr:
+                logger.warning(f"Вывод 'qobuz-dl dl' (stderr):\n{result.stderr}")
+            # ---------------------------------------------------------
+
             if "Invalid credentials" in result.stderr:
                 logger.error("Ошибка аутентификации Qobuz. Пожалуйста, выполните 'qobuz-dl -r' на сервере.")
                 return None, None
             if result.returncode != 0:
-                logger.error(f"Команда 'qobuz-dl dl' завершилась с ошибкой: {result.stderr}")
+                logger.error(f"Команда 'qobuz-dl dl' завершилась с кодом {result.returncode}.")
                 return None, None
             
             logger.info("Скачивание через CLI завершено. Поиск файлов...")
