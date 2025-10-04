@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
     if not all([audio_path, cover_path, audio_path.exists(), cover_path.exists()]):
+        logger.warning("Аудиофайл или обложка не найдены, встраивание невозможно.")
         return
     logger.info(f"🖼️ Встраивание обложки {cover_path.name} в файл {audio_path.name}...")
     temp_output_path = audio_path.with_suffix(f".temp{audio_path.suffix}")
@@ -58,10 +59,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("/start — приветствие\n/download <ссылка> — скачать трек\nИли просто отправь аудио для распознавания.")
 
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (код этой функции остается без изменений)
     message = update.message
     audio_source = message.audio or message.voice
     if not audio_source: return
+
     sent_message = await message.reply_text("🔎 Получил аудио, пытаюсь распознать...")
     temp_file_path = None
     try:
@@ -118,7 +119,6 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             embed_cover_art(audio_file, cover_file)
             size_mb = file_manager.get_file_size_mb(audio_file)
             
-            # --- ДОБАВЛЕНО ПОДРОБНОЕ ЛОГИРОВАНИЕ ---
             logger.info(f"ℹ️ Проверка файла для качества '{quality_name}': Размер = {size_mb:.2f} MB")
             
             if size_mb <= 48:
@@ -129,7 +129,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"⚠️ Файл слишком большой ({size_mb:.2f} MB).")
                 is_last_attempt = (i == len(QUALITY_HIERARCHY) - 1)
                 if is_last_attempt:
-                    logger.info(" последняя попытка, запускаю конвертацию в MP3.")
+                    logger.info("Это последняя попытка, запускаю конвертацию в MP3.")
                     await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
                     converted_file = convert_to_mp3(audio_file)
                     if converted_file:
@@ -138,11 +138,9 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     else:
                         logger.error("❌ Конвертация в MP3 не удалась.")
                 else:
-                    logger.info(" пробую следующее качество.")
-                    # Явно удаляем большие файлы сразу, чтобы не мешали
+                    logger.info("Пробую следующее качество.")
                     file_manager.safe_remove(audio_file)
                     if cover_file: file_manager.safe_remove(cover_file)
-
 
         if not audio_file_to_send:
             logger.error("❌ Ни один из вариантов скачивания/конвертации не дал подходящего файла.")
