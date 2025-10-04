@@ -17,7 +17,6 @@ class QobuzDownloader:
         logger.info("✅ Сервис загрузки Qobuz (CLI) инициализирован.")
 
     def search_track(self, artist: str, title: str) -> Optional[str]:
-        """Ищет трек по артисту и названию через CLI 'lucky', возвращает URL."""
         query = f"{artist} {title}"
         logger.info(f"🔍 Поиск на Qobuz через CLI 'lucky' по запросу: '{query}'")
         try:
@@ -49,7 +48,6 @@ class QobuzDownloader:
         return None
 
     async def download_track(self, url: str, quality_id: int) -> Tuple[Optional[Path], Optional[Path]]:
-        """Скачивает трек по URL через CLI 'dl'."""
         logger.info(f"⬇️ Запуск скачивания через CLI для URL: {url} с качеством ID: {quality_id}")
         try:
             venv_path = Path(sys.executable).parent.parent
@@ -59,10 +57,12 @@ class QobuzDownloader:
                 if item.is_file(): item.unlink()
                 elif item.is_dir(): shutil.rmtree(item)
 
+            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: ВОЗВРАЩАЕМ ФЛАГ --no-db ---
             command = [
                 str(qobuz_dl_path), "dl", url,
                 "-q", str(quality_id),
                 "--embed-art",
+                "--no-db", # Этот флаг заставит qobuz-dl скачивать файл каждый раз
                 "-d", str(self.download_dir)
             ]
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
