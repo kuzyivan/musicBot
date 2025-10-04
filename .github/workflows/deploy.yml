@@ -19,52 +19,35 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # --- Переменные ---
             APP_DIR="/root/musicBot"
-            REPO_URL="https://github.com/kuzyivan/musicBot.git"
-
-            # --- Переход в директорию и обновление кода ---
-            echo "📁 Переход в директорию проекта..."
-            mkdir -p "$APP_DIR"
+            
             cd "$APP_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd
 
-            echo "🔧 Обновление репозитория..."
-            if [ ! -d .git ]; then
-              git clone "$REPO_URL" .
-            else
-              # Принудительно сбрасываем все локальные изменения и обновляемся до последней версии из ветки main
-              git fetch origin main
-              git reset --hard origin/main
-              # Очищаем репозиторий от неотслеживаемых файлов (на всякий случай)
-              git clean -fd
-            fi
-
-            # --- Создание .env файла из секретов GitHub ---
+            # --- ИСПРАВЛЕННОЕ СОЗДАНИЕ .ENV ФАЙЛА ---
             echo "🤫 Создание .env файла из секретов..."
             echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
             echo "QOBUZ_LOGIN=${{ secrets.QOBUZ_LOGIN }}" >> .env
             echo "QOBUZ_PASSWORD=${{ secrets.QOBUZ_PASSWORD }}" >> .env
+            echo "AUDD_API_TOKEN=${{ secrets.AUDD_API_TOKEN }}" >> .env
             echo "✅ .env файл создан."
 
-            # --- Настройка виртуального окружения Python ---
             echo "🐍 Настройка виртуального окружения..."
             if [ ! -d "venv" ]; then
-              echo "Создание нового venv..."
-              python3 -m venv venv
+              python3.11 -m venv venv
             fi
             source venv/bin/activate
 
-            # --- Установка зависимостей ---
             echo "📦 Установка зависимостей..."
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            # --- Создание необходимых директорий ---
-            echo "📁 Создание директорий для логов и загрузок..."
+            echo "📁 Создание необходимых директорий..."
             mkdir -p logs
             mkdir -p Qobuz/Downloads
 
-            # --- Перезапуск сервиса ---
             echo "♻️ Перезапуск сервиса musicbot..."
             systemctl daemon-reload
             systemctl restart musicbot.service
