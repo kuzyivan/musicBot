@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 
 def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
     if not all([audio_path, cover_path, audio_path.exists(), cover_path.exists()]):
-        logger.warning("Аудиофайл или обложка не найдены, встраивание невозможно.")
         return
     logger.info(f"🖼️ Встраивание обложки {cover_path.name} в файл {audio_path.name}...")
     temp_output_path = audio_path.with_suffix(f".temp{audio_path.suffix}")
     try:
+        # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: Убираем конфликтующие параметры ---
         command = [
             "ffmpeg", "-i", str(audio_path), "-i", str(cover_path), "-map", "0:a",
             "-map", "1:v", "-c", "copy", "-disposition:v:0", "attached_pic",
@@ -50,9 +50,8 @@ def convert_to_mp3(file_path: Path) -> Optional[Path]:
         logger.error(f"❌ Ошибка конвертации ffmpeg: {e.stderr.decode()}")
         return None
 
-# --- ОБНОВЛЕННЫЙ СЛОВАРЬ КАЧЕСТВ ---
 QUALITY_HIERARCHY = {
-    "HI-RES (Max >96kHz)": 27,
+    "HI-RES (Max)": 27,
     "HI-RES (<96kHz)": 7,
     "CD (16-bit)": 6,
     "MP3 (320 kbps)": 5,

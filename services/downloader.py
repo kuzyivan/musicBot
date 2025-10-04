@@ -7,6 +7,7 @@ import subprocess
 import re
 import sys
 import shutil
+import requests
 from qobuz_dl.core import QobuzDL
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ class QobuzDownloader:
         self.download_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.client = QobuzDL()
+            # Вызываем get_tokens(), чтобы у self.client появился атрибут app_id
             self.client.get_tokens()
             logger.info("✅ Клиент Qobuz успешно инициализирован.")
         except Exception as e:
@@ -28,8 +30,7 @@ class QobuzDownloader:
             logger.error("❌ Клиент Qobuz не инициализирован для поиска.")
             return None
         
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ: ИЩЕМ ТОЛЬКО ПО НАЗВАНИЮ ТРЕКА ---
-        query = title
+        query = f"{artist} {title}"
         logger.info(f"🔍 Поиск на Qobuz через API по запросу: '{query}'")
         
         search_url = "https://www.qobuz.com/api.json/0.2/track/search"
@@ -39,7 +40,7 @@ class QobuzDownloader:
             logger.error("❌ Не удалось получить app_id из клиента Qobuz.")
             return None
 
-        params = { "query": query, "limit": 10, "app_id": app_id } # Увеличим лимит для большей выборки
+        params = { "query": query, "limit": 5, "app_id": app_id }
 
         try:
             response = requests.get(search_url, params=params)
@@ -47,17 +48,15 @@ class QobuzDownloader:
             results = response.json()
 
             if results and results.get('tracks', {}).get('items'):
-                # Пробуем найти наиболее релевантный результат, сравнивая и артиста
                 for item in results['tracks']['items']:
-                    track_title_from_qobuz = item.get('title', '').lower()
-                    performer_from_qobuz = item.get('performer', {}).get('name', '').lower()
-                    if title.lower() in track_title_from_qobuz and artist.lower() in performer_from_qobuz:
+                    track_title = item.get('title', '').lower()
+                    performer = item.get('performer', {}).get('name', '').lower()
+                    if title.lower() in track_title and artist.lower() in performer:
                         track_id = item['id']
                         url = f"https://open.qobuz.com/track/{track_id}"
                         logger.info(f"✅ Найден точный трек на Qobuz: {url}")
                         return url
                 
-                # Если точного совпадения по артисту нет, берем самый первый результат
                 first_track = results['tracks']['items'][0]
                 track_id = first_track['id']
                 url = f"https://open.qobuz.com/track/{track_id}"
@@ -71,7 +70,6 @@ class QobuzDownloader:
         return None
 
     async def download_track(self, url: str, quality_id: int) -> Tuple[Optional[Path], Optional[Path]]:
-        # ... (этот метод остается без изменений)
         logger.info(f"⬇️ Запуск скачивания через CLI для URL: {url} с качеством ID: {quality_id}")
         try:
             venv_path = Path(sys.executable).parent.parent
@@ -106,5 +104,6 @@ class QobuzDownloader:
     def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
         for f in self.download_dir.glob("**/*.*"):
             if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}:
-                return f, f.parent / "cover.jpg"
+                cover_file = f.parent / "cover.jpg"
+                return f, cover_file if cover_file.exists() else None
         return None, None
