@@ -24,7 +24,7 @@ def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
             "-map", "1:v", "-c", "copy", "-disposition:v:0", "attached_pic",
             "-id3v2_version", "3", str(temp_output_path)
         ]
-        subprocess.run(command, check=True, capture_output=True, stderr=subprocess.PIPE)
+        subprocess.run(command, check=True, capture_output=True)
         shutil.move(str(temp_output_path), str(audio_path))
         logger.info("✅ Обложка успешно встроена.")
     except subprocess.CalledProcessError as e:
@@ -42,7 +42,7 @@ def convert_to_mp3(file_path: Path) -> Optional[Path]:
             "ffmpeg", "-i", str(file_path), "-map", "0:a:0", "-b:a", "320k",
             "-map", "0:v?", "-c:v", "copy", "-id3v2_version", "3", str(mp3_path),
         ]
-        subprocess.run(command, check=True, capture_output=True, stderr=subprocess.PIPE)
+        subprocess.run(command, check=True, capture_output=True)
         logger.info(f"✅ Файл успешно сконвертирован в {mp3_path.name}")
         return mp3_path
     except subprocess.CalledProcessError as e:
