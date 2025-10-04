@@ -3,6 +3,7 @@ python-telegram-bot==20.7
 qobuz-dl==0.9.9.10
 pydub
 python-dotenv
+audD
 
 # --- Вспомогательные библиотеки (pip подберет совместимые версии) ---
 anyio
@@ -23,4 +24,3 @@ soupsieve
 tqdm
 typing_extensions
 urllib3
-audD
