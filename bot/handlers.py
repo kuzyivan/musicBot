@@ -14,11 +14,14 @@ import shutil
 logger = logging.getLogger(__name__)
 
 def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
-    if not all([audio_path, cover_path, audio_path.exists(), cover_path.exists()]):
+    # --- ИЗМЕНЕНИЕ ЗДЕСЬ: Упрощаем проверку для Pylance ---
+    if not cover_path or not cover_path.exists() or not audio_path or not audio_path.exists():
         logger.warning("Аудиофайл или обложка не найдены, встраивание невозможно.")
         return
+
     logger.info(f"Встраивание обложки {cover_path} в файл {audio_path} с помощью ffmpeg...")
     temp_output_path = audio_path.with_suffix(f".temp{audio_path.suffix}")
+
     try:
         command = [
             "ffmpeg", "-i", str(audio_path), "-i", str(cover_path), "-map", "0:a",
@@ -55,7 +58,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("/start — приветствие\n/download <ссылка> — скачать трек\nИли просто отправь аудио для распознавания.")
 
-# --- НОВЫЙ ОБРАБОТЧИК АУДИОСООБЩЕНИЙ ---
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     audio_source = message.audio or message.voice
