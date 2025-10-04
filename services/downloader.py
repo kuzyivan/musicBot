@@ -12,23 +12,17 @@ class QobuzDownloader:
         self.download_dir = Config.DOWNLOAD_DIR
         self.download_dir.mkdir(parents=True, exist_ok=True)
         
-        self.client = QobuzDL()
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+        # Просто инициализируем клиент. Он автоматически найдет и использует
+        # файл конфигурации, который вы создали с помощью 'qobuz-dl -r'.
         try:
-            logger.info("Инициализация клиента Qobuz...")
-            self.client.get_tokens()
-            self.client.initialize_client(
-                Config.QOBUZ_LOGIN,
-                Config.QOBUZ_PASSWORD,
-                self.client.app_id,
-                self.client.secrets
-            )
-            logger.info("Клиент Qobuz успешно инициализирован.")
+            self.client = QobuzDL()
+            logger.info("Клиент Qobuz успешно инициализирован (используя сохраненную сессию).")
         except Exception as e:
-            logger.exception("Не удалось инициализировать клиент Qobuz!")
+            logger.exception("Не удалось инициализировать клиент Qobuz! Убедитесь, что вы выполнили 'qobuz-dl -r' на сервере.")
             self.client = None
 
     def search_track(self, artist: str, title: str) -> Optional[str]:
-        """Ищет трек по артисту и названию, возвращает URL первого найденного."""
         if not self.client:
             return None
         
