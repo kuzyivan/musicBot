@@ -58,38 +58,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("/start — приветствие\n/download <ссылка> — скачать трек\nИли просто отправь аудио для распознавания.")
 
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (код этой функции остается без изменений)
     message = update.message
     audio_source = message.audio or message.voice
     if not audio_source: return
-
     sent_message = await message.reply_text("🔎 Получил аудио, пытаюсь распознать...")
     temp_file_path = None
     try:
         temp_audio_file = await audio_source.get_file()
         temp_file_path = Path(f"{temp_audio_file.file_id}{Path(temp_audio_file.file_path).suffix or '.ogg'}")
         await temp_audio_file.download_to_drive(temp_file_path)
-
         recognizer = AudioRecognizer()
         track_info = recognizer.recognize(str(temp_file_path))
-        
         if not track_info:
             await sent_message.edit_text("❌ К сожалению, не удалось распознать этот трек.")
             return
-
         artist, title = track_info['artist'], track_info['title']
         await sent_message.edit_text(f"✅ Распознано: `{artist} - {title}`. Ищу на Qobuz...", parse_mode='Markdown')
-
         downloader = QobuzDownloader()
         qobuz_url = downloader.search_track(artist, title)
-
         if not qobuz_url:
             await sent_message.edit_text(f"❌ Трек `{artist} - {title}` не найден на Qobuz.", parse_mode='Markdown')
             return
-        
         await sent_message.delete()
         context.args = [qobuz_url]
         await handle_download(update, context)
-
     except Exception as e:
         logger.error(f"❌ Ошибка в процессе распознавания: {e}")
         await sent_message.edit_text("❌ Произошла непредвиденная ошибка во время распознавания.")
@@ -117,26 +110,42 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             audio_file, cover_file = await downloader.download_track(url, quality_id)
             if cover_file: files_to_delete.add(cover_file)
-            if not audio_file: continue
+            if not audio_file:
+                logger.warning(f"⚠️ Файл для качества '{quality_name}' не был скачан.")
+                continue
 
             files_to_delete.add(audio_file)
             embed_cover_art(audio_file, cover_file)
             size_mb = file_manager.get_file_size_mb(audio_file)
             
+            # --- ДОБАВЛЕНО ПОДРОБНОЕ ЛОГИРОВАНИЕ ---
+            logger.info(f"ℹ️ Проверка файла для качества '{quality_name}': Размер = {size_mb:.2f} MB")
+            
             if size_mb <= 48:
+                logger.info("✅ Файл подходит по размеру. Прерываю цикл.")
                 audio_file_to_send, cover_file_to_send, track_details['quality_name'] = audio_file, cover_file, quality_name
                 break
             else:
+                logger.warning(f"⚠️ Файл слишком большой ({size_mb:.2f} MB).")
                 is_last_attempt = (i == len(QUALITY_HIERARCHY) - 1)
                 if is_last_attempt:
+                    logger.info(" последняя попытка, запускаю конвертацию в MP3.")
                     await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
                     converted_file = convert_to_mp3(audio_file)
                     if converted_file:
                         files_to_delete.add(converted_file)
                         audio_file_to_send, cover_file_to_send, track_details['quality_name'] = converted_file, cover_file, "MP3 (320 kbps)"
-                    break
+                    else:
+                        logger.error("❌ Конвертация в MP3 не удалась.")
+                else:
+                    logger.info(" пробую следующее качество.")
+                    # Явно удаляем большие файлы сразу, чтобы не мешали
+                    file_manager.safe_remove(audio_file)
+                    if cover_file: file_manager.safe_remove(cover_file)
+
 
         if not audio_file_to_send:
+            logger.error("❌ Ни один из вариантов скачивания/конвертации не дал подходящего файла.")
             await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="❌ Не удалось скачать файл.")
             return
 
