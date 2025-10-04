@@ -21,5 +21,5 @@ cp .env.example .env  # и заполни значения
 
 #new-2
 
-#serseramsterdam-2
+#serseramsterdam-3
 
