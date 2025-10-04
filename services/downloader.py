@@ -27,6 +27,27 @@ class QobuzDownloader:
             logger.exception("Не удалось инициализировать клиент Qobuz!")
             self.client = None
 
+    def search_track(self, artist: str, title: str) -> Optional[str]:
+        """Ищет трек по артисту и названию, возвращает URL первого найденного."""
+        if not self.client:
+            return None
+        
+        query = f"{artist} {title}"
+        logger.info(f"Поиск на Qobuz по запросу: '{query}'")
+        try:
+            results = self.client.search(query, limit=1, search_type="tracks")
+            if results and results.get('tracks', {}).get('items'):
+                first_track = results['tracks']['items'][0]
+                track_id = first_track['id']
+                url = f"https://open.qobuz.com/track/{track_id}"
+                logger.info(f"Найден трек на Qobuz: {url}")
+                return url
+        except Exception as e:
+            logger.error(f"Ошибка при поиске на Qobuz: {e}")
+        
+        logger.warning(f"Трек '{query}' не найден на Qobuz.")
+        return None
+
     async def download_track(self, url: str, quality_id: int) -> Tuple[Optional[Path], Optional[Path]]:
         if not self.client:
             logger.error("Клиент Qobuz не инициализирован. Скачивание невозможно.")
@@ -40,7 +61,6 @@ class QobuzDownloader:
             
             os.chdir(self.download_dir)
             
-            # Убрали embed_art=True, так как будем делать это вручную
             self.client.handle_url(url)
 
             audio_file, cover_file = self._find_downloaded_files()

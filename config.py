@@ -6,9 +6,11 @@ load_dotenv()
 
 class Config:
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    # Добавьте эти переменные
     QOBUZ_LOGIN = os.getenv("QOBUZ_LOGIN")
     QOBUZ_PASSWORD = os.getenv("QOBUZ_PASSWORD")
+    
+    # Переменная для AudD.io
+    AUDD_API_TOKEN = os.getenv("AUDD_API_TOKEN")
     
     DOWNLOAD_DIR = Path("/root/musicBot/Qobuz/Downloads")
     MAX_FILE_SIZE_MB = 2000
