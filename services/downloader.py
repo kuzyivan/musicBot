@@ -4,6 +4,9 @@ from config import Config
 import logging
 import os
 from qobuz_dl.core import QobuzDL
+import subprocess  # <-- Добавляем импорты
+import re
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -12,9 +15,6 @@ class QobuzDownloader:
         self.download_dir = Config.DOWNLOAD_DIR
         self.download_dir.mkdir(parents=True, exist_ok=True)
         
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-        # Просто инициализируем клиент. Он автоматически найдет и использует
-        # файл конфигурации, который вы создали с помощью 'qobuz-dl -r'.
         try:
             self.client = QobuzDL()
             logger.info("Клиент Qobuz успешно инициализирован (используя сохраненную сессию).")
@@ -22,25 +22,59 @@ class QobuzDownloader:
             logger.exception("Не удалось инициализировать клиент Qobuz! Убедитесь, что вы выполнили 'qobuz-dl -r' на сервере.")
             self.client = None
 
+    # --- ПОЛНОСТЬЮ ПЕРЕПИСАННЫЙ МЕТОД ПОИСКА ---
     def search_track(self, artist: str, title: str) -> Optional[str]:
-        if not self.client:
-            return None
-        
+        """Ищет трек по артисту и названию через CLI 'lucky', возвращает URL."""
         query = f"{artist} {title}"
-        logger.info(f"Поиск на Qobuz по запросу: '{query}'")
+        logger.info(f"Поиск на Qobuz через CLI 'lucky' по запросу: '{query}'")
+        
         try:
-            results = self.client.search(query, limit=1, search_type="tracks")
-            if results and results.get('tracks', {}).get('items'):
-                first_track = results['tracks']['items'][0]
-                track_id = first_track['id']
-                url = f"https://open.qobuz.com/track/{track_id}"
-                logger.info(f"Найден трек на Qobuz: {url}")
+            # Находим путь к исполняемому файлу qobuz-dl внутри нашего venv
+            venv_path = Path(sys.executable).parent.parent
+            qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
+
+            if not qobuz_dl_path.exists():
+                logger.error(f"Не найден исполняемый файл qobuz-dl по пути {qobuz_dl_path}")
+                return None
+
+            # Формируем команду
+            command = [
+                str(qobuz_dl_path),
+                "lucky",
+                query,
+                "--type", "track"
+            ]
+            
+            # Запускаем команду и перехватываем ее вывод
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                logger.error(f"Команда 'qobuz-dl lucky' завершилась с ошибкой: {result.stderr}")
+                return None
+
+            # Ищем ссылку в выводе команды с помощью регулярного выражения
+            output = result.stdout
+            logger.debug(f"Вывод 'qobuz-dl lucky':\n{output}")
+            
+            match = re.search(r"(https?://open\.qobuz\.com/track/\d+)", output)
+            if match:
+                url = match.group(1)
+                logger.info(f"Найдена ссылка на трек: {url}")
                 return url
+            else:
+                logger.warning(f"В выводе 'qobuz-dl lucky' не найдена ссылка на трек.")
+
         except Exception as e:
-            logger.error(f"Ошибка при поиске на Qobuz: {e}")
+            logger.error(f"Ошибка при поиске через CLI: {e}")
         
         logger.warning(f"Трек '{query}' не найден на Qobuz.")
         return None
+
 
     async def download_track(self, url: str, quality_id: int) -> Tuple[Optional[Path], Optional[Path]]:
         if not self.client:
@@ -52,6 +86,7 @@ class QobuzDownloader:
             logger.info(f"Запуск скачивания для URL: {url} с качеством ID: {quality_id}")
             self.client.limit_quality = quality_id
             self.client.no_db = True
+            self.client.embed_art = True
             
             os.chdir(self.download_dir)
             
