@@ -16,45 +16,43 @@ class QobuzDownloader:
         self.download_dir.mkdir(parents=True, exist_ok=True)
         logger.info("✅ Сервис загрузки Qobuz (CLI) инициализирован.")
 
-    def search_track(self, artist: str, title: str) -> Optional[str]:
-        """Ищет трек по артисту и названию через CLI 'lucky', возвращает URL."""
-        # Убираем из названия все, что в скобках, для более чистого поиска
+    def search_and_download_lucky(self, artist: str, title: str) -> Tuple[Optional[Path], Optional[Path]]:
+        """
+        Ищет трек через 'lucky' и, т.к. он сразу скачивает,
+        находит и возвращает путь к скачанному файлу.
+        """
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
         query = f"{artist} {clean_title}"
-        logger.info(f"🔍 Поиск на Qobuz через CLI 'lucky' по запросу: '{query}'")
+        logger.info(f"🔍 Поиск и скачивание на Qobuz через 'lucky': '{query}'")
+
+        # Очищаем папку перед скачиванием
+        for item in self.download_dir.glob("**/*"):
+            if item.is_file(): item.unlink()
+            elif item.is_dir(): shutil.rmtree(item)
+
         try:
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
 
-            # Увеличиваем таймаут, чтобы скачивание успело завершиться
-            command = [str(qobuz_dl_path), "lucky", query, "--type", "track", "--no-db"]
+            command = [
+                str(qobuz_dl_path), "lucky", query,
+                "--type", "track", "--no-db", "-d", str(self.download_dir)
+            ]
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-
+            
             if "Invalid credentials" in result.stderr:
                 logger.error("❌ Ошибка аутентификации Qobuz. Пожалуйста, выполните 'qobuz-dl -r' на сервере.")
-                return None
+                return None, None
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl lucky' завершилась с ошибкой: {result.stderr}")
-                return None
+                return None, None
 
-            # Вывод 'lucky' может быть в stdout или stderr, поэтому объединяем
-            combined_output = result.stdout + result.stderr
-            match = re.search(r"(https?://open\.qobuz\.com/track/\d+)", combined_output)
-            if match:
-                url = match.group(1)
-                logger.info(f"✅ Найдена ссылка на трек: {url}")
-                # Удаляем временный файл, скачанный 'lucky'
-                for f in Path(".").glob("**/*.*"):
-                    if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}:
-                        f.unlink()
-                return url
-            else:
-                logger.warning(f"⚠️ В выводе 'qobuz-dl lucky' не найдена ссылка на трек. Вывод:\n{combined_output}")
+            logger.info("✅ Команда 'lucky' выполнена. Ищем результат...")
+            return self._find_downloaded_files()
+
         except Exception as e:
-            logger.error(f"❌ Ошибка при поиске через CLI: {e}")
-        
-        logger.warning(f"❌ Трек '{query}' не найден на Qobuz.")
-        return None
+            logger.error(f"❌ Ошибка при поиске и скачивании через 'lucky': {e}")
+            return None, None
 
     async def download_track(self, url: str, quality_id: int) -> Tuple[Optional[Path], Optional[Path]]:
         """Скачивает трек по URL через CLI 'dl'."""
