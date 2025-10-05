@@ -1,6 +1,6 @@
 import logging
-# Убираем неверный импорт и добавляем Defaults
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, Defaults
+# Убираем ненужный импорт Defaults
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
 from bot.handlers import start, help_command, handle_download, handle_audio_recognition
 from config import Config
@@ -26,16 +26,16 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("🚀 Запуск бота...")
     
-    # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
-    # Создаем объект Defaults с увеличенными тайм-аутами
-    defaults = Defaults(
-        connect_timeout=30,
-        read_timeout=120,
-        write_timeout=120,
+    # --- ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ ---
+    # Задаём тайм-ауты напрямую через методы ApplicationBuilder
+    app = (
+        ApplicationBuilder()
+        .token(Config.BOT_TOKEN)
+        .connect_timeout(30)
+        .read_timeout(120)
+        .write_timeout(120)
+        .build()
     )
-    
-    # Передаем defaults в ApplicationBuilder
-    app = ApplicationBuilder().token(Config.BOT_TOKEN).defaults(defaults).build()
     # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
     app.add_handler(CommandHandler("start", start))
