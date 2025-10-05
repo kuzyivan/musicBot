@@ -1,13 +1,13 @@
 from pathlib import Path
 from typing import Optional, Tuple
 from config import Config
-import shlex
 import logging
 import os
 import subprocess
 import re
 import sys
 import shutil
+import shlex
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,12 @@ class QobuzDownloader:
         находит и возвращает путь к скачанному файлу.
         """
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
-        query = f"{artist} {clean_title}"
+        
+        # Санитизация (экранирование) для защиты от Command Injection
+        safe_artist = shlex.quote(artist)
+        safe_title = shlex.quote(clean_title)
+        query = f"{safe_artist} {safe_title}"
+
         logger.info(f"🔍 Поиск и скачивание на Qobuz через 'lucky': '{query}'")
 
         # Очищаем папку перед скачиванием
@@ -36,14 +41,11 @@ class QobuzDownloader:
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
 
             command = [
-                str(qobuz_dl_path), "lucky", query,
+                str(qobuz_dl_path), "lucky", query, 
                 "--type", "track", "--no-db", "-d", str(self.download_dir)
             ]
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
             
-            if "Invalid credentials" in result.stderr:
-                logger.error("❌ Ошибка аутентификации Qobuz. Пожалуйста, выполните 'qobuz-dl -r' на сервере.")
-                return None, None
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl lucky' завершилась с ошибкой: {result.stderr}")
                 return None, None
@@ -74,9 +76,6 @@ class QobuzDownloader:
             ]
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
 
-            if "Invalid credentials" in result.stderr:
-                logger.error("❌ Ошибка аутентификации Qobuz. Пожалуйста, выполните 'qobuz-dl -r' на сервере.")
-                return None, None
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl dl' завершилась с ошибкой: {result.stderr}")
                 return None, None
@@ -91,6 +90,16 @@ class QobuzDownloader:
     def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
         for f in self.download_dir.glob("**/*.*"):
             if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}:
+                # --- ПРОВЕРКА ОТ PATH TRAVERSAL ---
+                try:
+                    f.resolve().relative_to(self.download_dir.resolve())
+                except ValueError:
+                    logger.warning(
+                        f"Попытка обхода каталога! Файл '{f}' вне рабочей директории. Пропускаем."
+                    )
+                    continue
+                # --- КОНЕЦ ПРОВЕРКИ ---
+
                 cover_file = f.parent / "cover.jpg"
                 return f, cover_file if cover_file.exists() else None
         return None, None
