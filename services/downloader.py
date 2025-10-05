@@ -17,35 +17,34 @@ class QobuzDownloader:
         logger.info("✅ Сервис загрузки Qobuz (CLI) инициализирован.")
 
     def search_track(self, artist: str, title: str) -> Optional[str]:
-        """Ищет трек по артисту и названию через CLI 'lucky', возвращает URL."""
+        """Ищет трек по артисту и названию через CLI 'search' и возвращает URL."""
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
         query = f"{artist} {clean_title}"
-        logger.info(f"🔍 Поиск на Qobuz через CLI 'lucky' по запросу: '{query}'")
+        logger.info(f"🔍 Поиск на Qobuz через CLI 'search' по запросу: '{query}'")
         try:
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
 
-            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: ДОБАВЛЯЕМ ФЛАГ --no-db ---
-            command = [str(qobuz_dl_path), "lucky", query, "--type", "track", "--no-db"]
+            # --- ИЗМЕНЕНИЕ ЗДЕСЬ: ИСПОЛЬЗУЕМ 'search' ВМЕСТО 'lucky' ---
+            command = [str(qobuz_dl_path), "search", query, "--type", "track", "-l", "1"] # -l 1 = ищем только 1 результат
             result = subprocess.run(command, capture_output=True, text=True, timeout=30)
 
             if "Invalid credentials" in result.stderr:
                 logger.error("❌ Ошибка аутентификации Qobuz. Пожалуйста, выполните 'qobuz-dl -r' на сервере.")
                 return None
             if result.returncode != 0:
-                logger.error(f"❌ Команда 'qobuz-dl lucky' завершилась с ошибкой: {result.stderr}")
+                logger.error(f"❌ Команда 'qobuz-dl search' завершилась с ошибкой: {result.stderr}")
                 return None
 
+            # Вывод 'search' гораздо чище, ищем ссылку в stdout
             output = result.stdout
-            # Ищем ссылку в stdout или stderr, так как qobuz-dl может выводить ее в разные потоки
-            combined_output = result.stdout + result.stderr
-            match = re.search(r"(https?://open\.qobuz\.com/track/\d+)", combined_output)
+            match = re.search(r"(https?://open\.qobuz\.com/track/\d+)", output)
             if match:
                 url = match.group(1)
                 logger.info(f"✅ Найдена ссылка на трек: {url}")
                 return url
             else:
-                logger.warning(f"⚠️ В выводе 'qobuz-dl lucky' не найдена ссылка на трек.")
+                logger.warning(f"⚠️ В выводе 'qobuz-dl search' не найдена ссылка на трек.")
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске через CLI: {e}")
         
