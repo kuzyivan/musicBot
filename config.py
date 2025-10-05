@@ -12,6 +12,6 @@ class Config:
     # Переменная для AudD.io
     AUDD_API_TOKEN = os.getenv("AUDD_API_TOKEN")
     
-    DOWNLOAD_DIR = Path("/root/musicBot/Qobuz/Downloads")
+    DOWNLOAD_DIR = Path("/opt/musicBot/Qobuz/Downloads")
     MAX_FILE_SIZE_MB = 2000
     LOG_FILE = Path("logs/bot.log")

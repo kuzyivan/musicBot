@@ -19,8 +19,8 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            APP_DIR="/root/musicBot"
-            
+            APP_DIR="/opt/musicBot"
+
             cd "$APP_DIR"
             git fetch origin main
             git reset --hard origin/main
