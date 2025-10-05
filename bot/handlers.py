@@ -45,15 +45,25 @@ def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
         return
     logger.info(f"🖼️ Встраивание обложки {cover_path.name} в файл {audio_path.name}...")
     temp_output_path = audio_path.with_suffix(f".temp{audio_path.suffix}")
+    
     try:
+        # Базовая команда для всех типов файлов
         command = [
             "ffmpeg", "-i", str(audio_path), "-i", str(cover_path), "-map", "0:a",
-            "-map", "1:v", "-c", "copy", "-disposition:v:0", "attached_pic",
-            "-id3v2_version", "3", str(temp_output_path)
+            "-map", "1:v", "-c", "copy", "-disposition:v:0", "attached_pic"
         ]
+        
+        # Указываем версию ID3 тега ТОЛЬКО для не-FLAC файлов (например, mp3)
+        # Для FLAC ffmpeg сам использует правильный нативный формат (picture block)
+        if audio_path.suffix.lower() != '.flac':
+            command.extend(["-id3v2_version", "3"])
+        
+        command.append(str(temp_output_path))
+        
         subprocess.run(command, check=True, capture_output=True)
         shutil.move(str(temp_output_path), str(audio_path))
         logger.info("✅ Обложка успешно встроена.")
+        
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ Не удалось встроить обложку с помощью ffmpeg: {e.stderr.decode()}")
     except Exception as e:
@@ -84,7 +94,7 @@ QUALITY_HIERARCHY = {
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎵 Привет! Я бот версии 3.0 и могу скачивать треки с Qobuz. 🚀")
+    await update.message.reply_text("🎵 Привет! Я бот версии 2.0 и могу скачивать треки с Qobuz. 🚀")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("/start — приветствие\n/download <ссылка> — скачать трек\nИли просто отправь аудио для распознавания.")
@@ -160,19 +170,21 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
 
         if size_mb <= 48:
             audio_file_to_send = audio_file
+            cover_file_to_send = cover_file
         else:
             await sent_message.edit_text(f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
             converted_file = convert_to_mp3(audio_file)
             if converted_file:
                 files_to_delete.add(converted_file)
                 audio_file_to_send = converted_file
+                cover_file_to_send = cover_file
         
         if not audio_file_to_send:
             await sent_message.edit_text("❌ Файл слишком большой, и не удалось его сконвертировать.")
             return
 
         await sent_message.edit_text("📤 Отправка файла...")
-        await send_file_to_user(update, context, audio_file_to_send, cover_file, "https://qobuz.com")
+        await send_file_to_user(update, context, audio_file_to_send, cover_file_to_send, "https://qobuz.com")
         await sent_message.delete()
 
     except Exception as e:
@@ -216,13 +228,16 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             size_mb = file_manager.get_file_size_mb(audio_file)
             logger.info(f"ℹ️ Проверка файла '{quality_name}': Размер = {size_mb:.2f} MB")
             
+            # Если файл подходит по размеру, прерываем цикл и готовимся к отправке
             if size_mb <= 48:
                 logger.info("✅ Файл подходит по размеру. Готовлю к отправке.")
                 audio_file_to_send = audio_file
                 cover_file_to_send = cover_file
                 break 
             
+            # Если файл слишком большой
             logger.warning(f"⚠️ Файл слишком большой ({size_mb:.2f} MB).")
+            # Если это последняя попытка, и файл всё ещё большой, конвертируем его
             is_last_attempt = (i == len(QUALITY_HIERARCHY) - 1)
             if is_last_attempt:
                 logger.info("Это последняя попытка, запускаю конвертацию в MP3.")
@@ -233,6 +248,7 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     audio_file_to_send = converted_file
                     cover_file_to_send = cover_file
             else:
+                # Если это не последняя попытка, просто удаляем большой файл и пробуем следующее качество
                 file_manager.safe_remove(audio_file)
         
         if not audio_file_to_send:
