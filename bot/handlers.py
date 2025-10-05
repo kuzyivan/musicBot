@@ -12,12 +12,32 @@ from typing import Optional
 import shutil
 import time
 from collections import defaultdict
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
 # --- БЛОК ДЛЯ ОГРАНИЧЕНИЯ ЗАПРОСОВ (RATE LIMIT) ---
 USER_TIMESTAMPS = defaultdict(float)
 COOLDOWN_SECONDS = 30 # Разрешаем один запрос раз в 30 секунд
+
+def rate_limit(cooldown: int):
+    """Декоратор для ограничения частоты вызова функции."""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+            user_id = update.effective_user.id
+            current_time = time.time()
+            
+            if current_time - USER_TIMESTAMPS[user_id] < cooldown:
+                # Отвечаем только на сообщения с текстом или аудио, чтобы не спамить в ответ на редактирование
+                if update.message:
+                    await update.message.reply_text(f"⏳ Пожалуйста, подождите {cooldown} секунд перед следующим запросом.")
+                return
+            
+            USER_TIMESTAMPS[user_id] = current_time
+            return await func(update, context, *args, **kwargs)
+        return wrapper
+    return decorator
 # --- КОНЕЦ БЛОКА ---
 
 
@@ -149,17 +169,8 @@ async def process_and_send_audio(
             file_manager.safe_remove(file_to_delete)
         logger.info("✅ Временные файлы удалены.")
 
-
+@rate_limit(COOLDOWN_SECONDS)
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    current_time = time.time()
-    
-    if current_time - USER_TIMESTAMPS[user_id] < COOLDOWN_SECONDS:
-        await update.message.reply_text(f"⏳ Пожалуйста, подождите {COOLDOWN_SECONDS} секунд перед следующим запросом.")
-        return
-    
-    USER_TIMESTAMPS[user_id] = current_time
-
     message = update.message
     audio_source = message.audio or message.voice
     if not audio_source: return
@@ -199,16 +210,8 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
         if temp_file_path and temp_file_path.exists():
             temp_file_path.unlink()
 
+@rate_limit(COOLDOWN_SECONDS)
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    current_time = time.time()
-    
-    if current_time - USER_TIMESTAMPS[user_id] < COOLDOWN_SECONDS:
-        await update.message.reply_text(f"⏳ Пожалуйста, подождите {COOLDOWN_SECONDS} секунд перед следующим запросом.")
-        return
-    
-    USER_TIMESTAMPS[user_id] = current_time
-
     url = context.args[0] if context.args else getattr(getattr(update, 'message', None), 'text', '').strip()
     if not url: return
 
