@@ -10,8 +10,16 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 import shutil
+import time
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+
+# --- БЛОК ДЛЯ ОГРАНИЧЕНИЯ ЗАПРОСОВ (RATE LIMIT) ---
+USER_TIMESTAMPS = defaultdict(float)
+COOLDOWN_SECONDS = 30 # Разрешаем один запрос раз в 30 секунд
+# --- КОНЕЦ БЛОКА ---
+
 
 def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
     if not all([audio_path, cover_path, audio_path.exists(), cover_path.exists()]):
@@ -57,7 +65,7 @@ QUALITY_HIERARCHY = {
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎵 Привет! Я бот версии V3.0 и могу скачивать треки с Qobuz. 🚀")
+    await update.message.reply_text("🎵 Привет! Я бот версии 2.0 и могу скачивать треки с Qobuz. 🚀")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("/start — приветствие\n/download <ссылка> — скачать трек\nИли просто отправь аудио для распознавания.")
@@ -143,6 +151,15 @@ async def process_and_send_audio(
 
 
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_time = time.time()
+    
+    if current_time - USER_TIMESTAMPS[user_id] < COOLDOWN_SECONDS:
+        await update.message.reply_text(f"⏳ Пожалуйста, подождите {COOLDOWN_SECONDS} секунд перед следующим запросом.")
+        return
+    
+    USER_TIMESTAMPS[user_id] = current_time
+
     message = update.message
     audio_source = message.audio or message.voice
     if not audio_source: return
@@ -176,12 +193,22 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
 
     except Exception as e:
         logger.error(f"❌ Ошибка в процессе распознавания: {e}")
-        await sent_message.edit_text("❌ Произошла непредвиденная ошибка во время распознавания.")
+        if sent_message:
+            await sent_message.edit_text("❌ Произошла непредвиденная ошибка во время распознавания.")
     finally:
         if temp_file_path and temp_file_path.exists():
             temp_file_path.unlink()
 
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_time = time.time()
+    
+    if current_time - USER_TIMESTAMPS[user_id] < COOLDOWN_SECONDS:
+        await update.message.reply_text(f"⏳ Пожалуйста, подождите {COOLDOWN_SECONDS} секунд перед следующим запросом.")
+        return
+    
+    USER_TIMESTAMPS[user_id] = current_time
+
     url = context.args[0] if context.args else getattr(getattr(update, 'message', None), 'text', '').strip()
     if not url: return
 
@@ -201,9 +228,8 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             audio_file, cover_file = await downloader.download_track(url, quality_id)
             
             if audio_file:
-                # Если скачивание удалось, передаем управление новой функции
                 await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url)
-                return # Выходим из функции, т.к. работа сделана
+                return 
             
             logger.warning(f"⚠️ Файл для качества '{quality_name}' не был скачан. Пробую следующее.")
 
@@ -211,4 +237,5 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     except Exception as e:
         logger.exception(f"❌ Общая ошибка при обработке запроса: {e}")
-        await update.message.reply_text(f"❌ Произошла ошибка: {e}")
+        if sent_message:
+            await sent_message.edit_text(f"❌ Произошла ошибка: {e}")
