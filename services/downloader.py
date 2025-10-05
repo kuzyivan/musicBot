@@ -18,6 +18,7 @@ class QobuzDownloader:
 
     def search_track(self, artist: str, title: str) -> Optional[str]:
         """Ищет трек по артисту и названию через CLI 'lucky', возвращает URL."""
+        # Убираем из названия все, что в скобках, для более чистого поиска
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
         query = f"{artist} {clean_title}"
         logger.info(f"🔍 Поиск на Qobuz через CLI 'lucky' по запросу: '{query}'")
@@ -25,9 +26,9 @@ class QobuzDownloader:
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
 
-            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: ДОБАВЛЯЕМ ФЛАГ --no-db ---
+            # Увеличиваем таймаут, чтобы скачивание успело завершиться
             command = [str(qobuz_dl_path), "lucky", query, "--type", "track", "--no-db"]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=180)
 
             if "Invalid credentials" in result.stderr:
                 logger.error("❌ Ошибка аутентификации Qobuz. Пожалуйста, выполните 'qobuz-dl -r' на сервере.")
@@ -42,6 +43,10 @@ class QobuzDownloader:
             if match:
                 url = match.group(1)
                 logger.info(f"✅ Найдена ссылка на трек: {url}")
+                # Удаляем временный файл, скачанный 'lucky'
+                for f in Path(".").glob("**/*.*"):
+                    if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}:
+                        f.unlink()
                 return url
             else:
                 logger.warning(f"⚠️ В выводе 'qobuz-dl lucky' не найдена ссылка на трек. Вывод:\n{combined_output}")
@@ -81,7 +86,7 @@ class QobuzDownloader:
             return self._find_downloaded_files()
             
         except Exception as e:
-            logger.error(f"❌ Ошибка при поиске через CLI: {e}")
+            logger.error(f"❌ Ошибка при скачивании через CLI: {e}")
             return None, None
 
     def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
