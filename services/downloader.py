@@ -18,7 +18,6 @@ class QobuzDownloader:
 
     def search_track(self, artist: str, title: str) -> Optional[str]:
         """Ищет трек по артисту и названию через CLI 'lucky', возвращает URL."""
-        # --- УЛУЧШЕНИЕ: Очищаем название от текста в скобках ---
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
         query = f"{artist} {clean_title}"
         logger.info(f"🔍 Поиск на Qobuz через CLI 'lucky' по запросу: '{query}'")
@@ -26,7 +25,8 @@ class QobuzDownloader:
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
 
-            command = [str(qobuz_dl_path), "lucky", query, "--type", "track"]
+            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: ДОБАВЛЯЕМ ФЛАГ --no-db ---
+            command = [str(qobuz_dl_path), "lucky", query, "--type", "track", "--no-db"]
             result = subprocess.run(command, capture_output=True, text=True, timeout=30)
 
             if "Invalid credentials" in result.stderr:
@@ -37,7 +37,9 @@ class QobuzDownloader:
                 return None
 
             output = result.stdout
-            match = re.search(r"(https?://open\.qobuz\.com/track/\d+)", output)
+            # Ищем ссылку в stdout или stderr, так как qobuz-dl может выводить ее в разные потоки
+            combined_output = result.stdout + result.stderr
+            match = re.search(r"(https?://open\.qobuz\.com/track/\d+)", combined_output)
             if match:
                 url = match.group(1)
                 logger.info(f"✅ Найдена ссылка на трек: {url}")
