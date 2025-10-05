@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional, Tuple
 from config import Config
+import shlex
 import logging
 import os
 import subprocess
@@ -18,7 +19,7 @@ class QobuzDownloader:
 
     def search_and_download_lucky(self, artist: str, title: str) -> Tuple[Optional[Path], Optional[Path]]:
         """
-        Ищет трек через 'lucky' и, т.к. он сразу скачивает,
+        Ищет трек через 'lucky' и, т.к. он сразу скачивает, 
         находит и возвращает путь к скачанному файлу.
         """
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
