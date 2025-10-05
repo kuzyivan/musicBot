@@ -25,6 +25,7 @@ class QobuzDownloader:
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
 
+            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: ДОБАВЛЯЕМ ФЛАГ --no-db ---
             command = [str(qobuz_dl_path), "lucky", query, "--type", "track", "--no-db"]
             result = subprocess.run(command, capture_output=True, text=True, timeout=30)
 
@@ -80,7 +81,7 @@ class QobuzDownloader:
             return self._find_downloaded_files()
             
         except Exception as e:
-            logger.error(f"❌ Ошибка при скачивании через CLI: {e}")
+            logger.error(f"❌ Ошибка при поиске через CLI: {e}")
             return None, None
 
     def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
