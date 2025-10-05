@@ -1,5 +1,7 @@
 import logging
+from telegram.request import Request
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+
 from bot.handlers import start, help_command, handle_download, handle_audio_recognition
 from config import Config
 from dotenv import load_dotenv
@@ -24,7 +26,11 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("🚀 Запуск бота...")
     
-    app = ApplicationBuilder().token(Config.BOT_TOKEN).build()
+    # Увеличиваем тайм-ауты для надёжной работы с файлами
+    # 30 секунд на подключение, 120 секунд (2 минуты) на чтение/запись
+    request = Request(connect_timeout=30, read_timeout=120, write_timeout=120)
+    
+    app = ApplicationBuilder().token(Config.BOT_TOKEN).request(request).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
