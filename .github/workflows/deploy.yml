@@ -23,22 +23,25 @@ jobs:
             
             cd "$APP_DIR"
 
+            # --- РЕШЕНИЕ ПРОБЛЕМЫ С "DUBIOUS OWNERSHIP" ---
             # Добавляем директорию в список безопасных для Git
             git config --global --add safe.directory "$APP_DIR"
             
             echo "🔄 Обновление кода из репозитория..."
             git fetch origin main
             git reset --hard origin/main
-            
-            # --- ИСПРАВЛЕНИЕ ---
-            # Очищаем папку, ИСКЛЮЧАЯ (-e) директорию 'home'
-            git clean -fd -e home
-            
+            git clean -fd
+
             echo "🤫 Создание .env файла из секретов..."
             echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
             echo "QOBUZ_LOGIN=${{ secrets.QOBUZ_LOGIN }}" >> .env
             echo "QOBUZ_PASSWORD=${{ secrets.QOBUZ_PASSWORD }}" >> .env
             echo "AUDD_API_TOKEN=${{ secrets.AUDD_API_TOKEN }}" >> .env
+            
+            # --- ДОБАВИТЬ ЭТИ ДВЕ СТРОКИ ---
+            echo "SPOTIPY_CLIENT_ID=${{ secrets.SPOTIPY_CLIENT_ID }}" >> .env
+            echo "SPOTIPY_CLIENT_SECRET=${{ secrets.SPOTIPY_CLIENT_SECRET }}" >> .env
+            
             echo "✅ .env файл создан."
 
             echo "🐍 Настройка виртуального окружения..."
@@ -63,4 +66,3 @@ jobs:
             systemctl restart musicbot.service
 
             echo "✅ Развертывание успешно завершено!"
-            

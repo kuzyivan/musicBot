@@ -1,5 +1,5 @@
 import logging
-# Убираем ненужный импорт Defaults
+# Убираем ненужный импорт (вы уже сделали)
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
 from bot.handlers import start, help_command, handle_download, handle_audio_recognition
@@ -26,8 +26,7 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("🚀 Запуск бота...")
     
-    # --- ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ ---
-    # Задаём тайм-ауты напрямую через методы ApplicationBuilder
+    # --- ВАШИ УЛУЧШЕНИЯ С ТАЙМ-АУТАМИ (ОСТАВЛЕНЫ) ---
     app = (
         ApplicationBuilder()
         .token(Config.BOT_TOKEN)
@@ -36,16 +35,20 @@ def main():
         .write_timeout(120)
         .build()
     )
-    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+    # --- КОНЕЦ БЛОКА С ТАЙМ-АУТАМИ ---
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("download", handle_download))
     
+    # --- ОБНОВЛЕНИЕ ДЛЯ НОВОЙ ЛОГИКИ ЗДЕСЬ ---
     app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.Regex(r"qobuz\.com/"), 
+        # Этот Regex теперь ловит и qobuz.com, и http://googleusercontent.com/spotify.com/5
+        filters.TEXT & ~filters.COMMAND & filters.Regex(r"(qobuz\.com/|spotify\.com/)"), 
         handle_download
     ))
+    # --- КОНЕЦ ОБНОВЛЕНИЯ ---
+    
     app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE, handle_audio_recognition))
 
     app.run_polling()
