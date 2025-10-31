@@ -92,7 +92,7 @@ class QobuzDownloader:
             process_env = os.environ.copy()
             process_env["HOME"] = str(PROJECT_HOME_DIR)
 
-            result = subprocess.run(command, capture_output=True, text=True, timeout=180, env=process_env)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=180)
             # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
             if result.returncode != 0:
