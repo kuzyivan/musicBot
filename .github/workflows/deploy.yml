@@ -47,11 +47,14 @@ jobs:
             
             mkdir -p "$QOBUZ_CONFIG_DIR"
             
+            # --- ПРИНУДИТЕЛЬНОЕ УДАЛЕНИЕ СТАРОГО ФАЙЛА ---
+            rm -f "$QOBUZ_CONFIG_FILE"
+            
             cat > "$QOBUZ_CONFIG_FILE" <<- EOF
             [DEFAULT]
             email = ${{ secrets.QOBUZ_LOGIN }}
             password = ${{ secrets.QOBUZ_PASSWORD }}
-            default_folder =
+            default_folder = 
             default_quality = 27
             default_limit = none
             EOF
