@@ -43,8 +43,8 @@ def main():
     
     # --- ОБНОВЛЕНИЕ ДЛЯ НОВОЙ ЛОГИКИ ЗДЕСЬ ---
     app.add_handler(MessageHandler(
-        # Этот Regex теперь ловит и qobuz.com, и http://googleusercontent.com/spotify.com/5
-        filters.TEXT & ~filters.COMMAND & filters.Regex(r"(qobuz\.com/|spotify\.com/)"), 
+        # Этот Regex теперь ловит только настоящие домены qobuz.com или spotify.com
+        filters.TEXT & ~filters.COMMAND & filters.Regex(r"https?:\/\/([a-zA-Z0-9\-]+\.)*(qobuz\.com|spotify\.com)\/"), 
         handle_download
     ))
     # --- КОНЕЦ ОБНОВЛЕНИЯ ---
