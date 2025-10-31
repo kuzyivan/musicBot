@@ -40,6 +40,28 @@ jobs:
             echo "SPOTIPY_CLIENT_SECRET=${{ secrets.SPOTIPY_CLIENT_SECRET }}" >> .env
             echo "✅ .env файл создан."
 
+            # --- ИСПРАВЛЕНИЕ QOBUZ (ИЗМЕНЕНИЕ ЗДЕСЬ) ---
+            echo "⚙️ Создание конфигурации Qobuz..."
+            QOBUZ_CONFIG_DIR="/opt/musicBot/home/.config/qobuz-dl"
+            QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
+            
+            mkdir -p "$QOBUZ_CONFIG_DIR"
+            
+            # --- ПРИНУДИТЕЛЬНОЕ УДАЛЕНИЕ СТАРОГО ФАЙЛА ---
+            rm -f "$QOBUZ_CONFIG_FILE"
+            
+            cat > "$QOBUZ_CONFIG_FILE" <<- EOF
+            [DEFAULT]
+            email = ${{ secrets.QOBUZ_LOGIN }}
+            password = ${{ secrets.QOBUZ_PASSWORD }}
+            default_folder =
+            default_quality = 27
+            default_limit = none
+            EOF
+            
+            echo "✅ config.ini для Qobuz создан."
+            # --- КОНЕЦ ИСПРАВЛЕНИЯ QOBUZ ---
+
             echo "🐍 Настройка виртуального окружения..."
             if [ ! -d "venv" ]; then
               python3.11 -m venv venv
