@@ -44,7 +44,17 @@ class QobuzDownloader:
                 str(qobuz_dl_path), "lucky", query, 
                 "--type", "track", "--no-db", "-d", str(self.download_dir)
             ]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+            
+            # --- ИСПРАВЛЕНИЕ: УКАЗЫВАЕМ ПРАВИЛЬНЫЙ HOME ДЛЯ QOBUZ-DL ---
+            # Config.DOWNLOAD_DIR = /opt/musicBot/Qobuz/Downloads
+            # APP_DIR = /opt/musicBot
+            APP_DIR = Config.DOWNLOAD_DIR.parent.parent
+            PROJECT_HOME_DIR = APP_DIR / "home"
+            process_env = os.environ.copy()
+            process_env["HOME"] = str(PROJECT_HOME_DIR)
+            
+            result = subprocess.run(command, capture_output=True, text=True, timeout=180, env=process_env)
+            # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
             
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl lucky' завершилась с ошибкой: {result.stderr}")
@@ -74,7 +84,16 @@ class QobuzDownloader:
                 "--embed-art", "--no-db",
                 "-d", str(self.download_dir)
             ]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+
+            # --- ИСПРАВЛЕНИЕ: УКАЗЫВАЕМ ПРАВИЛЬНЫЙ HOME ДЛЯ QOBUZ-DL ---
+            # APP_DIR = /opt/musicBot
+            APP_DIR = Config.DOWNLOAD_DIR.parent.parent
+            PROJECT_HOME_DIR = APP_DIR / "home"
+            process_env = os.environ.copy()
+            process_env["HOME"] = str(PROJECT_HOME_DIR)
+
+            result = subprocess.run(command, capture_output=True, text=True, timeout=180, env=process_env)
+            # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl dl' завершилась с ошибкой: {result.stderr}")
