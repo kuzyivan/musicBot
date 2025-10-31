@@ -1,7 +1,11 @@
 from pathlib import Path
 from typing import Optional, Tuple
 from config import Config
-from savify import Savify, PathHolder, Format, Quality
+# --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
+from savify import Savify
+from savify.types import Format, Quality
+from savify.utils import PathHolder
+# --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 import logging
 import shutil
 import asyncio
@@ -20,7 +24,7 @@ class SavifyDownloader:
             api_creds = None
 
         # Укажем Savify качать все в нашу папку, НЕ создавая подпапки
-        # Это КРИТИЧЕСКИ важно, чтобы легко находить скачанные файлы
+        # Теперь `PathHolder` будет найден
         path_holder = PathHolder(downloads_path=self.download_dir)
         
         self.savify = Savify(
