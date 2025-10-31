@@ -79,24 +79,20 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Главный обработчик-маршрутизатор. 
     Определяет тип ссылки и вызывает нужный воркер.
     """
-    # Получаем URL (как вы и делали, из команды или из текста)
     url = context.args[0] if context.args else getattr(getattr(update, 'message', None), 'text', '').strip()
     if not url: return
 
-    # Маршрутизатор
     if re.search(r"qobuz\.com/", url):
         await _download_qobuz(update, context, url)
     elif re.search(r"spotify\.com/", url):
         await _download_spotify(update, context, url)
     else:
-        # Этого не должно случиться, т.к. main.py уже фильтрует
         await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на Qobuz или Spotify.")
 
 
 async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     """
     Логика скачивания с Qobuz.
-    (Код из вашего старого `handle_download` перенесен сюда)
     """
     downloader = QobuzDownloader()
     sent_message = await update.message.reply_text("⏳ Начинаю поиск на Qobuz...")
@@ -109,17 +105,15 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
                 text=f"💿 Qobuz: Пробую скачать в качестве: {quality_name}..."
             )
             
-            # Ваша функция скачивания
             audio_file, cover_file = await downloader.download_track(url, quality_id)
             
             if audio_file:
-                # Передаем управление общему обработчику отправки
                 await process_and_send_audio(
                     update, context, sent_message, 
                     audio_file, cover_file, 
                     url_for_caption=url, source="Qobuz"
                 )
-                return # Выходим, работа сделана
+                return 
             
             logger.warning(f"⚠️ Qobuz: Файл для качества '{quality_name}' не был скачан. Пробую следующее.")
 
@@ -151,7 +145,6 @@ async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         audio_file, cover_file = await downloader.download_track(url)
         
         if audio_file:
-            # Передаем управление общему обработчику отправки
             await process_and_send_audio(
                 update, context, sent_message, 
                 audio_file, cover_file, 
@@ -177,12 +170,11 @@ async def process_and_send_audio(
     initial_audio_file: Path,
     initial_cover_file: Optional[Path],
     url_for_caption: str,
-    source: str # Добавили, чтобы знать, откуда пришел файл
+    source: str 
 ):
     """
     УНИВЕРСАЛЬНАЯ функция.
     Обрабатывает, конвертирует и отправляет ЛЮБОЙ скачанный файл.
-    Теперь читает ID3-теги.
     """
     file_manager = FileManager()
     files_to_delete = set()
@@ -197,7 +189,6 @@ async def process_and_send_audio(
         if initial_cover_file:
             files_to_delete.add(initial_cover_file)
 
-        # Встраиваем обложку (ваша функция)
         embed_cover_art(initial_audio_file, initial_cover_file)
         
         await sent_message.edit_text("💿 Файл скачан, проверяю размер...")
@@ -206,8 +197,7 @@ async def process_and_send_audio(
         
         audio_file_to_send = initial_audio_file
         
-        # --- ЛОГИКА КОНВЕРТАЦИИ (как у вас) ---
-        if size_mb > 48: # Лимит Telegram на аудио
+        if size_mb > 48: 
             await sent_message.edit_text(f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
             converted_file = convert_to_mp3(initial_audio_file)
             if converted_file:
@@ -220,21 +210,16 @@ async def process_and_send_audio(
 
         await sent_message.edit_text("📤 Файл готов, начинается отправка...")
 
-        # --- НОВАЯ УЛУЧШЕННАЯ ЛОГИКА МЕТАДАННЫХ ---
         track_details = _get_metadata_from_file(audio_file_to_send)
         
-        # Если теги не прочитались (например, FLAC от Qobuz без тегов),
-        # используем вашу старую логику парсинга имени папки
-        if not track_details.get('title'):
+        if not track_details.get('title') or track_details.get('title') == 'N/A':
             logger.warning("Не удалось прочитать ID3-теги, парсим имя папки...")
             track_details = _get_metadata_from_qobuz_path(audio_file_to_send)
         
-        # Получаем реальное качество
         real_quality = file_manager.get_audio_quality(audio_file_to_send) or "N/A"
         if "MP3" in real_quality and source == "Spotify":
              real_quality = "MP3 (до 320 kbps)"
 
-        # --- Формируем имя файла и подпись ---
         ext = audio_file_to_send.suffix
         custom_filename = (
             f"{track_details.get('artist', 'Unknown')} - "
@@ -251,18 +236,35 @@ async def process_and_send_audio(
             f"Скачано с [{source}]({url_for_caption})"
         )
 
-        # Отправка аудио
+        # --- НАЧАЛО ИСПРАВЛЕНИЯ: ВОЗВРАЩАЕМ КРАСИВЫЙ ОТВЕТ ---
+        
+        # 1. Отправляем аудиофайл БЕЗ подписи
         with open(audio_file_to_send, 'rb') as f:
             await context.bot.send_audio(
                 chat_id=update.effective_chat.id, 
                 audio=f, 
-                filename=custom_filename,
-                caption=caption_text, # Теперь подпись прямо с аудиофайлом
+                filename=custom_filename
+            )
+        
+        # 2. Отправляем обложку С ПОДПИСЬЮ
+        if initial_cover_file and initial_cover_file.exists():
+            with open(initial_cover_file, 'rb') as img:
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id, 
+                    photo=img, 
+                    caption=caption_text, 
+                    parse_mode='Markdown'
+                )
+        else:
+            # 3. Если обложки нет, просто отправляем подпись текстом
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=caption_text,
                 parse_mode='Markdown'
             )
         
-        # Отправку обложки можно убрать, т.к. она уже в подписи
-        # (Ваш старый код отправлял ее отдельно, этот вариант лучше)
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
         await sent_message.delete()
 
     finally:
@@ -280,20 +282,15 @@ def _get_metadata_from_file(file_path: Path) -> dict:
         if not audio:
             return {}
         
-        # Используем .get() для безопасного извлечения, 
-        # берем первый элемент списка или 'N/A'
         details['artist'] = audio.get('artist', ['N/A'])[0]
         details['title'] = audio.get('title', ['N/A'])[0]
         details['album'] = audio.get('album', ['N/A'])[0]
         
-        # Год может быть в разных тегах
         year = (audio.get('date', []) or 
                 audio.get('TDRC', []) or 
                 audio.get('TDRL', []) or 
                 ['N/A'])
         
-        # mutagen.id3.TDRC -> 2011-01-28T00:00:00Z
-        # Очищаем год, берем только первые 4 цифры
         details['year'] = re.sub(r'[^0-9]', '', str(year[0]))[:4]
         if not details['year']: details['year'] = 'N/A'
 
@@ -318,7 +315,7 @@ def _get_metadata_from_qobuz_path(audio_file: Path) -> dict:
         return {}
 
 
-# --- РАСПОЗНАВАНИЕ АУДИО (обновлен вызов process_and_send_audio) ---
+# --- РАСПОЗНАВАНИЕ АУДИО (без изменений) ---
 
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -349,9 +346,7 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
             await sent_message.edit_text(f"❌ Трек `{artist} - {title}` не найден на Qobuz.", parse_mode='Markdown')
             return
 
-        fake_url = "https://qobuz.com" # URL для подписи
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-        # Добавляем `source`, чтобы соответствовать новой функции
+        fake_url = "https://qobuz.com"
         await process_and_send_audio(
             update, context, sent_message, 
             audio_file, cover_file, 
