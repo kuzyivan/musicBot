@@ -17,6 +17,16 @@ class QobuzDownloader:
         self.download_dir.mkdir(parents=True, exist_ok=True)
         logger.info("✅ Сервис загрузки Qobuz (CLI) инициализирован.")
 
+    def _get_config_path(self) -> str:
+        """
+        Определяет путь к config.ini, который создается deploy-скриптом.
+        Путь: /opt/musicBot/home/.config/qobuz-dl/config.ini
+        """
+        # Config.DOWNLOAD_DIR = /opt/musicBot/Qobuz/Downloads
+        # APP_DIR = /opt/musicBot
+        APP_DIR = Config.DOWNLOAD_DIR.parent.parent
+        return str(APP_DIR / "home" / ".config" / "qobuz-dl" / "config.ini")
+
     def search_and_download_lucky(self, artist: str, title: str) -> Tuple[Optional[Path], Optional[Path]]:
         """
         Ищет трек через 'lucky' и, т.к. он сразу скачивает, 
@@ -39,10 +49,12 @@ class QobuzDownloader:
         try:
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
+            config_path = self._get_config_path()
 
             command = [
                 str(qobuz_dl_path), "lucky", query, 
-                "--type", "track", "--no-db", "-d", str(self.download_dir)
+                "--type", "track", "--no-db", "-d", str(self.download_dir),
+                "--config-path", config_path  # <-- ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ
             ]
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
             
@@ -63,6 +75,7 @@ class QobuzDownloader:
         try:
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
+            config_path = self._get_config_path()
 
             for item in self.download_dir.glob("**/*"):
                 if item.is_file(): item.unlink()
@@ -72,7 +85,8 @@ class QobuzDownloader:
                 str(qobuz_dl_path), "dl", url,
                 "-q", str(quality_id),
                 "--embed-art", "--no-db",
-                "-d", str(self.download_dir)
+                "-d", str(self.download_dir),
+                "--config-path", config_path  # <-- ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ
             ]
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
 
