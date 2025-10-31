@@ -40,7 +40,7 @@ jobs:
             echo "SPOTIPY_CLIENT_SECRET=${{ secrets.SPOTIPY_CLIENT_SECRET }}" >> .env
             echo "✅ .env файл создан."
 
-            # --- ИСПРАВЛЕНИЕ QOBUZ (ИЗМЕНЕНИЕ ЗДЕСЬ) ---
+            # --- ИСПРАВЛЕНИЕ QOBUZ ---
             echo "⚙️ Создание конфигурации Qobuz..."
             QOBUZ_CONFIG_DIR="/opt/musicBot/home/.config/qobuz-dl"
             QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
@@ -53,6 +53,7 @@ jobs:
             password = ${{ secrets.QOBUZ_PASSWORD }}
             default_folder = 
             quality = 27
+            default_limit = none
             EOF
             
             echo "✅ config.ini для Qobuz создан."
@@ -68,7 +69,7 @@ jobs:
             pip install --upgrade pip
             pip install -r requirements.txt
             
-            # --- ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ SAVIFY (ОСТАВЛЯЕМ) ---
+            # --- ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ SAVIFY ---
             echo "🔧 Установка YouTube загрузчиков..."
             pip uninstall -y youtube-dl yt-dlp yt-dlp-compat-youtube-dl
             
