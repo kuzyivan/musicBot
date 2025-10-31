@@ -42,7 +42,7 @@ jobs:
 
             # --- ИСПРАВЛЕНИЕ QOBUZ (ИЗМЕНЕНИЕ ЗДЕСЬ) ---
             echo "⚙️ Создание конфигурации Qobuz..."
-            QOBUZ_CONFIG_DIR="/opt/musicBot/home/.config/qobuz-dl"
+            QOBUZ_CONFIG_DIR="/root/.config/qobuz-dl"
             QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
             
             mkdir -p "$QOBUZ_CONFIG_DIR"
