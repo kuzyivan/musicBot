@@ -24,7 +24,6 @@ jobs:
             cd "$APP_DIR"
 
             # --- РЕШЕНИЕ ПРОБЛЕМЫ С "DUBIOUS OWNERSHIP" ---
-            # Добавляем директорию в список безопасных для Git
             git config --global --add safe.directory "$APP_DIR"
             
             echo "🔄 Обновление кода из репозитория..."
@@ -37,12 +36,29 @@ jobs:
             echo "QOBUZ_LOGIN=${{ secrets.QOBUZ_LOGIN }}" >> .env
             echo "QOBUZ_PASSWORD=${{ secrets.QOBUZ_PASSWORD }}" >> .env
             echo "AUDD_API_TOKEN=${{ secrets.AUDD_API_TOKEN }}" >> .env
-            
-            # --- ДОБАВИТЬ ЭТИ ДВЕ СТРОКИ ---
             echo "SPOTIPY_CLIENT_ID=${{ secrets.SPOTIPY_CLIENT_ID }}" >> .env
             echo "SPOTIPY_CLIENT_SECRET=${{ secrets.SPOTIPY_CLIENT_SECRET }}" >> .env
-            
             echo "✅ .env файл создан."
+
+            # --- НАЧАЛО ИСПРАВЛЕНИЯ QOBUZ ---
+            echo "⚙️ Создание конфигурации Qobuz..."
+            QOBUZ_CONFIG_DIR="/opt/musicBot/home/.config/qobuz-dl"
+            QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
+            
+            mkdir -p "$QOBUZ_CONFIG_DIR"
+            
+            # Создаем config.ini
+            # (Мы используем 'EOF' для многострочной записи)
+            cat > "$QOBUZ_CONFIG_FILE" <<- EOF
+            [DEFAULT]
+            email = ${{ secrets.QOBUZ_LOGIN }}
+            password = ${{ secrets.QOBUZ_PASSWORD }}
+            download_dir = 
+            quality = 27
+            EOF
+            
+            echo "✅ config.ini для Qobuz создан."
+            # --- КОНЕЦ ИСПРАВЛЕНИЯ QOBUZ ---
 
             echo "🐍 Настройка виртуального окружения..."
             if [ ! -d "venv" ]; then
@@ -53,12 +69,18 @@ jobs:
             echo "📦 Установка зависимостей..."
             pip install --upgrade pip
             pip install -r requirements.txt
+            
+            # --- УСТАНОВКА YOUTUBE ЗАГРУЗЧИКОВ ---
+            # (Устанавливаем их здесь, чтобы исправить Savify)
+            pip uninstall -y youtube-dl yt-dlp
+            pip install -U "yt-dlp[youtube-dl-compat]"
 
             echo "📁 Создание необходимых директорий..."
             mkdir -p logs
             mkdir -p Qobuz/Downloads
             
             echo "🔐 Установка прав доступа для пользователя musicbot..."
+            # Устанавливаем владельца на ВСЮ папку, включая venv и config
             chown -R musicbot:musicbot "$APP_DIR"
 
             echo "♻️ Перезапуск сервиса musicbot..."
