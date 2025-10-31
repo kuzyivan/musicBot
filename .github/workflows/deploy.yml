@@ -54,7 +54,7 @@ jobs:
             [DEFAULT]
             email = ${{ secrets.QOBUZ_LOGIN }}
             password = ${{ secrets.QOBUZ_PASSWORD }}
-            default_folder = 
+            default_folder =
             default_quality = 27
             default_limit = none
             EOF
