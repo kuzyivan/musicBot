@@ -57,6 +57,7 @@ jobs:
             default_folder =
             default_quality = 27
             default_limit = none
+            no_m3u = true
             EOF
             
             echo "✅ config.ini для Qobuz создан."
