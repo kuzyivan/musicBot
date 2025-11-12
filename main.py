@@ -2,14 +2,15 @@
 
 import logging
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
-from telegram.request import HTTPXRequest # <-- Важный импорт для локального API
+# Мы продолжим использовать HTTPXRequest, но не будем передавать base_url напрямую.
+from telegram.request import HTTPXRequest 
 
 from bot.handlers import start, help_command, handle_download, handle_audio_recognition
 from config import Config
 from dotenv import load_dotenv
 
-# --- ВОССТАНОВИТЬ ЭТУ ФУНКЦИЮ! ---
 def setup_logging():
+    # ... (Оставьте функцию setup_logging без изменений)
     Config.LOG_FILE.parent.mkdir(exist_ok=True)
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -21,33 +22,36 @@ def setup_logging():
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("telegram.ext").setLevel(logging.WARNING)
-# -----------------------------------
 
 def main():
     load_dotenv()
-    # Ошибка здесь: функция должна быть определена выше!
-    setup_logging() 
+    setup_logging()
     
     logger = logging.getLogger(__name__)
     logger.info("🚀 Запуск бота...")
     
-    # Конфигурация локального API (как мы ее обновили)
-    LOCAL_API_ROOT = "http://127.0.0.1:8081/bot"
+    # --- НАЧАЛО ИСПРАВЛЕНИЯ ОШИБКИ: ИСПОЛЬЗУЕМ API_URL В BUILDER'Е ---
     
+    # 1. Определяем базовый URL локального сервера (он включает /bot)
+    LOCAL_API_URL = "http://127.0.0.1:8081"
+    
+    # 2. Создаем request-объект, передавая только таймауты (без base_url)
     local_request = HTTPXRequest(
-        base_url=LOCAL_API_ROOT,
         connect_timeout=30,
         read_timeout=120,
         write_timeout=120,
     )
 
+    # 3. Передаем request-объект И API_URL в ApplicationBuilder
+    # NOTE: API_URL должен быть базовым URL, НЕ включая /bot<TOKEN>/
     app = (
         ApplicationBuilder()
         .token(Config.BOT_TOKEN)
-        .request(local_request)
+        .request(local_request) 
+        .api_url(LOCAL_API_URL) # <-- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Указываем URL здесь!
         .build()
     )
-    # ... (обработчики) ...
+    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
