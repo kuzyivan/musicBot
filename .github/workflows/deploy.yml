@@ -43,16 +43,22 @@ jobs:
             echo "SPOTIPY_CLIENT_SECRET=${{ secrets.SPOTIPY_CLIENT_SECRET }}" >> .env
             echo "✅ .env файл создан."
 
-            # --- ИСПРАВЛЕНИЕ QOBUZ (ИЗМЕНЕНИЕ ЗДЕСЬ) ---
+            # --- ИСПРАВЛЕНИЕ QOBUZ (ПРАВИЛЬНЫЙ ПУТЬ) ---
             echo "⚙️ Создание конфигурации Qobuz..."
-            QOBUZ_CONFIG_DIR="/opt/musicBot/home/.config/qobuz-dl"
+
+            # 1. Сначала уберем защиту со СТАРОГО, НЕПРАВИЛЬНОГО файла (чтобы скрипт не падал)
+            echo "🔓 Снятие защиты (атрибута immutable) со старого файла..."
+            chattr -i "/opt/musicBot/home/.config/qobuz-dl/config.ini" || true
+            chattr -i "/opt/musicBot/home/.config/qobuz-dl" || true
+            
+            # 2. Указываем на настоящий домашний каталог пользователя musicbot
+            QOBUZ_CONFIG_DIR="/home/musicbot/.config/qobuz-dl"
             QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
             
+            # 3. Создаем новую директорию
             mkdir -p "$QOBUZ_CONFIG_DIR"
             
-            # --- ПРИНУДИТЕЛЬНОЕ УДАЛЕНИЕ СТАРОГО ФАЙЛА ---
-            rm -f "$QOBUZ_CONFIG_FILE"
-            
+            # 4. Создаем новый config.ini
             cat > "$QOBUZ_CONFIG_FILE" <<- EOF
             [DEFAULT]
             email = ${{ secrets.QOBUZ_LOGIN }}
@@ -63,7 +69,10 @@ jobs:
             no_m3u = true
             EOF
             
-            echo "✅ config.ini для Qobuz создан."
+            # 5. Устанавливаем права на новую директорию (chown в конце скрипта ее не зацепит)
+            chown -R musicbot:musicbot "$QOBUZ_CONFIG_DIR"
+            
+            echo "✅ config.ini для Qobuz создан в /home/musicbot/."
             # --- КОНЕЦ ИСПРАВЛЕНИЯ QOBUZ ---
 
             echo "🐍 Настройка виртуального окружения..."
