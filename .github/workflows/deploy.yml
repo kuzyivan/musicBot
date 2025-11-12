@@ -79,6 +79,7 @@ jobs:
             og_cover = true
             embed_art = true
             no_cover = false
+            no_database = true
             EOF
             # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
             
