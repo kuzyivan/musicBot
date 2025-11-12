@@ -19,18 +19,27 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            APP_DIR="/root/musicBot"  # <--- ИСПРАВЛЕНИЕ #1
+            APP_DIR="/root/musicBot"
+            REPO_URL="https://github.com/kuzyivan/musicBot.git"
             
-            echo "📁 Создание директории приложения..."
-            mkdir -p "$APP_DIR"
+            echo "📁 Проверка директории $APP_DIR..."
             
-            cd "$APP_DIR"
-
-            echo "🔄 Обновление кода из репозитория..."
-            git config --global --add safe.directory "$APP_DIR"
-            git fetch origin main
-            git reset --hard origin/main
-            git clean -fd
+            # --- НОВАЯ ЛОГИКА ОБНОВЛЕНИЯ КОДА ---
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "🤔 .git папка не найдена. Клонируем репозиторий..."
+              # Удаляем все, что могло там быть, и клонируем
+              rm -rf "$APP_DIR"
+              git clone "$REPO_URL" "$APP_DIR"
+              cd "$APP_DIR"
+            else
+              echo "👍 .git папка найдена. Обновляем код..."
+              cd "$APP_DIR"
+              git config --global --add safe.directory "$APP_DIR"
+              git fetch origin main
+              git reset --hard origin/main
+              git clean -fd
+            fi
+            # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
 
             echo "🤫 Создание .env файла из секретов..."
             echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
@@ -51,7 +60,7 @@ jobs:
             chattr -i "/home/musicbot/.config/qobuz-dl" || true
 
             # 2. Указываем на настоящий домашний каталог пользователя ROOT
-            QOBUZ_CONFIG_DIR="/root/.config/qobuz-dl" # <--- ИСПРАВЛЕНИЕ #2
+            QOBUZ_CONFIG_DIR="/root/.config/qobuz-dl"
             QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
             
             mkdir -p "$QOBUZ_CONFIG_DIR"
@@ -88,10 +97,6 @@ jobs:
             mkdir -p logs
             mkdir -p Qobuz/Downloads
             
-            # Команда chown -R musicbot:musicbot "$APP_DIR" УДАЛЕНА, 
-            # так как сервис работает от root и папка /root/musicBot 
-            # и так принадлежит root.
-
             echo "♻️ Перезапуск сервиса musicbot..."
             systemctl daemon-reload
             systemctl restart musicbot.service
