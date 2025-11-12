@@ -34,17 +34,17 @@ class QobuzDownloader:
                 str(qobuz_dl_path), "lucky", query, 
                 "--type", "track", "--no-db", "-d", str(self.download_dir)
             ]
-            
+
             # Выполняем как команду
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-            
+
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl lucky' завершилась с ошибкой: {result.stderr}")
                 return None, None
-            
+
             logger.info("✅ Команда 'lucky' выполнена. Ищем результат...")
             return self._find_downloaded_files()
-        
+
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске и скачивании через 'lucky': {e}")
             return None, None
@@ -55,29 +55,29 @@ class QobuzDownloader:
             # Ищем qobuz-dl внутри venv, запущенного systemd
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
-            
+
             # Очистка папки перед скачиванием
             for item in self.download_dir.glob("**/*"):
                 if item.is_file(): item.unlink()
                 elif item.is_dir(): shutil.rmtree(item)
-            
+
             command = [
                 str(qobuz_dl_path), "dl", url,
                 "-q", str(quality_id),
                 "--embed-art", "--no-db",
                 "-d", str(self.download_dir)
             ]
-            
+
             # Выполняем как команду
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-            
+
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl dl' завершилась с ошибкой: {result.stderr}")
                 return None, None
-            
+
             logger.info("✅ Скачивание через CLI завершено. Поиск файлов...")
             return self._find_downloaded_files()
-        
+
         except Exception as e:
             logger.error(f"❌ Ошибка при скачивании через CLI: {e}")
             return None, None
