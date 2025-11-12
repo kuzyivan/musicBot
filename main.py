@@ -2,8 +2,8 @@
 
 import logging
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
-# Мы продолжим использовать HTTPXRequest, но не будем передавать base_url напрямую.
-from telegram.request import HTTPXRequest 
+# HTTPXRequest больше не нужен, если мы используем base_url
+# from telegram.request import HTTPXRequest 
 
 from bot.handlers import start, help_command, handle_download, handle_audio_recognition
 from config import Config
@@ -30,28 +30,23 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("🚀 Запуск бота...")
     
-    # --- НАЧАЛО ИСПРАВЛЕНИЯ ОШИБКИ: ИСПОЛЬЗУЕМ API_URL В BUILDER'Е ---
+    # --- НАЧАЛО ОКОНЧАТЕЛЬНОГО ИСПРАВЛЕНИЯ ---
     
-    # 1. Определяем базовый URL локального сервера (он включает /bot)
-    LOCAL_API_URL = "http://127.0.0.1:8081"
+    # Определяем полный URL, включая /bot
+    LOCAL_API_ROOT = "http://127.0.0.1:8081/bot"
     
-    # 2. Создаем request-объект, передавая только таймауты (без base_url)
-    local_request = HTTPXRequest(
-        connect_timeout=30,
-        read_timeout=120,
-        write_timeout=120,
-    )
-
-    # 3. Передаем request-объект И API_URL в ApplicationBuilder
-    # NOTE: API_URL должен быть базовым URL, НЕ включая /bot<TOKEN>/
+    # ApplicationBuilder позволяет установить базовый URL через .base_url()
     app = (
         ApplicationBuilder()
         .token(Config.BOT_TOKEN)
-        .request(local_request) 
-        .api_url(LOCAL_API_URL) # <-- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Указываем URL здесь!
+        # КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: используем base_url для указания локального API
+        .base_url(LOCAL_API_ROOT) 
+        .connect_timeout(30)
+        .read_timeout(120)
+        .write_timeout(120)
         .build()
     )
-    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+    # --- КОНЕЦ ОКОНЧАТЕЛЬНОГО ИСПРАВЛЕНИЯ ---
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
