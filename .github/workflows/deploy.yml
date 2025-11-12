@@ -19,7 +19,7 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            APP_DIR="/root/musicBot"  # &lt;--- ИСПРАВЛЕНИЕ #1
+            APP_DIR="/root/musicBot"  # <--- ИСПРАВЛЕНИЕ #1
             
             echo "📁 Создание директории приложения..."
             mkdir -p "$APP_DIR"
@@ -51,7 +51,7 @@ jobs:
             chattr -i "/home/musicbot/.config/qobuz-dl" || true
 
             # 2. Указываем на настоящий домашний каталог пользователя ROOT
-            QOBUZ_CONFIG_DIR="/root/.config/qobuz-dl" # &lt;--- ИСПРАВЛЕНИЕ #2
+            QOBUZ_CONFIG_DIR="/root/.config/qobuz-dl" # <--- ИСПРАВЛЕНИЕ #2
             QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
             
             mkdir -p "$QOBUZ_CONFIG_DIR"
