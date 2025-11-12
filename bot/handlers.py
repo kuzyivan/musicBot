@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from services.downloader import QobuzDownloader
-from services.savify_downloader import SavifyDownloader # <-- Импортируем новый сервис
+from services.savify_downloader import SavifyDownloader 
 from services.file_manager import FileManager
 from services.recognizer import AudioRecognizer
 from config import Config
@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
 import shutil
-import mutagen # <-- Импортируем mutagen для чтения тегов
+import mutagen 
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ QUALITY_HIERARCHY = {
     "MP3 (320 kbps)": 5,
 }
 
-# --- Команды Start/Help (обновлены) ---
+# --- Команды Start/Help (без изменений) ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎵 Привет! Я бот версии 2.0 и могу скачивать треки с Qobuz и Spotify. 🚀")
@@ -72,7 +72,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Или просто отправь аудио для распознавания."
     )
 
-# --- НОВЫЙ УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ЗАГРУЗКИ ---
+# --- НОВЫЙ УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ЗАГРУЗКИ (без изменений) ---
 
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -161,7 +161,7 @@ async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await update.message.reply_text(f"❌ Spotify: Произошла ошибка: {e}")
 
 
-# --- УЛУЧШЕННЫЙ ОБРАБОТЧИК ОТПРАВКИ ---
+# --- УЛУЧШЕННЫЙ ОБРАБОТЧИК ОТПРАВКИ (ИЗМЕНЕНИЕ ЛИМИТА) ---
 
 async def process_and_send_audio(
     update: Update,
@@ -197,7 +197,8 @@ async def process_and_send_audio(
         
         audio_file_to_send = initial_audio_file
         
-        if size_mb > 48: 
+        # --- ИЗМЕНЕНИЕ: Используем Config.MAX_FILE_SIZE_MB (2000 МБ) вместо 48 МБ ---
+        if size_mb > Config.MAX_FILE_SIZE_MB: 
             await sent_message.edit_text(f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
             converted_file = convert_to_mp3(initial_audio_file)
             if converted_file:
@@ -236,8 +237,6 @@ async def process_and_send_audio(
             f"Скачано с [{source}]({url_for_caption})"
         )
 
-        # --- НАЧАЛО ИСПРАВЛЕНИЯ: ВОЗВРАЩАЕМ КРАСИВЫЙ ОТВЕТ ---
-        
         # 1. Отправляем аудиофайл БЕЗ подписи
         with open(audio_file_to_send, 'rb') as f:
             await context.bot.send_audio(
@@ -263,8 +262,6 @@ async def process_and_send_audio(
                 parse_mode='Markdown'
             )
         
-        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
         await sent_message.delete()
 
     finally:
