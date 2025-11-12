@@ -77,6 +77,7 @@ jobs:
             albums_only = false
             no_fallback = true
             og_cover = true
+            embed_art = true
             EOF
             # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
             
