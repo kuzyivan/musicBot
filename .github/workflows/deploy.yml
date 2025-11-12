@@ -78,6 +78,7 @@ jobs:
             no_fallback = true
             og_cover = true
             embed_art = true
+            no_cover = false
             EOF
             # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
             
