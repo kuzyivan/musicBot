@@ -65,7 +65,7 @@ jobs:
             
             mkdir -p "$QOBUZ_CONFIG_DIR"
             
-            # --- ВОТ ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ---
+            # --- ВОТ ИСПРАВЛЕНИЕ ---
             cat > "$QOBUZ_CONFIG_FILE" <<- EOF
             [DEFAULT]
             email = ${{ secrets.QOBUZ_LOGIN }}
@@ -76,6 +76,7 @@ jobs:
             no_m3u = true
             albums_only = false
             no_fallback = true
+            og_cover = true
             EOF
             # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
             
