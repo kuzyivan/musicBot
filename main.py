@@ -1,5 +1,4 @@
 import logging
-# Убираем ненужный импорт (вы уже сделали)
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
 from bot.handlers import start, help_command, handle_download, handle_audio_recognition
@@ -41,13 +40,13 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("download", handle_download))
     
-    # --- ОБНОВЛЕНИЕ ДЛЯ НОВОЙ ЛОГИКИ ЗДЕСЬ ---
+    # --- ИСПРАВЛЕНИЕ REGEX ЗДЕСЬ ---
     app.add_handler(MessageHandler(
-        # Этот Regex теперь ловит только настоящие домены qobuz.com или spotify.com
-        filters.TEXT & ~filters.COMMAND & filters.Regex(r"https?:\/\/([a-zA-Z0-9\-]+\.)*(qobuz\.com|spotify\.com)\/"), 
+        # Этот Regex теперь ловит только настоящие домены open.qobuz.com или open.spotify.com
+        filters.TEXT & ~filters.COMMAND & filters.Regex(r"https?:\/\/(open|play)\.(qobuz|spotify)\.com\/"), 
         handle_download
     ))
-    # --- КОНЕЦ ОБНОВЛЕНИЯ ---
+    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
     
     app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE, handle_audio_recognition))
 
