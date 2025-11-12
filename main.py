@@ -59,7 +59,12 @@ def main():
     
     app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE, handle_audio_recognition))
 
-    app.run_polling()
+    app.run_polling(
+        # Устанавливаем таймаут polling-а в 60 секунд (стандартное значение Telegram)
+        # Это должно соответствовать таймаутам соединения, которые вы указали выше.
+        poll_interval=0, 
+        timeout=60
+    )
 
 if __name__ == "__main__":
     main()
