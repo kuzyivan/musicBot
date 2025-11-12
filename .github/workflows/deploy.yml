@@ -19,6 +19,8 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -e # <-- ВАЖНО! Останавливает скрипт при любой ошибке.
+
             APP_DIR="/root/musicBot"
             REPO_URL="https://github.com/kuzyivan/musicBot.git"
             
@@ -27,7 +29,7 @@ jobs:
             # --- НОВАЯ ЛОГИКА ОБНОВЛЕНИЯ КОДА ---
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "🤔 .git папка не найдена. Клонируем репозиторий..."
-              # Удаляем все, что могло там быть, и клонируем
+              # Удаляем все, что могло там быть (хотя мы уже удалили вручную)
               rm -rf "$APP_DIR"
               git clone "$REPO_URL" "$APP_DIR"
               cd "$APP_DIR"
@@ -53,13 +55,11 @@ jobs:
             # --- ИСПРАВЛЕНИЕ QOBUZ (ПРАВИЛЬНЫЙ ПУТЬ ДЛЯ ROOT) ---
             echo "⚙️ Создание конфигурации Qobuz..."
             
-            # 1. Убираем защиту со старых неправильных файлов
             chattr -i "/opt/musicBot/home/.config/qobuz-dl/config.ini" || true
             chattr -i "/opt/musicBot/home/.config/qobuz-dl" || true
             chattr -i "/home/musicbot/.config/qobuz-dl/config.ini" || true
             chattr -i "/home/musicbot/.config/qobuz-dl" || true
 
-            # 2. Указываем на настоящий домашний каталог пользователя ROOT
             QOBUZ_CONFIG_DIR="/root/.config/qobuz-dl"
             QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
             
