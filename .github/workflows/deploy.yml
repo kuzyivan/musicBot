@@ -29,7 +29,6 @@ jobs:
             # --- НОВАЯ ЛОГИКА ОБНОВЛЕНИЯ КОДА ---
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "🤔 .git папка не найдена. Клонируем репозиторий..."
-              # Удаляем все, что могло там быть
               rm -rf "$APP_DIR"
               git clone "$REPO_URL" "$APP_DIR"
               cd "$APP_DIR"
@@ -52,38 +51,10 @@ jobs:
             echo "SPOTIPY_CLIENT_SECRET=${{ secrets.SPOTIPY_CLIENT_SECRET }}" >> .env
             echo "✅ .env файл создан."
 
-            # --- ИСПРАВЛЕНИЕ QOBUZ (ПРАВИЛЬНЫЙ ПУТЬ ДЛЯ ROOT) ---
-            echo "⚙️ Создание конфигурации Qobuz..."
-            
-            chattr -i "/opt/musicBot/home/.config/qobuz-dl/config.ini" || true
-            chattr -i "/opt/musicBot/home/.config/qobuz-dl" || true
-            chattr -i "/home/musicbot/.config/qobuz-dl/config.ini" || true
-            chattr -i "/home/musicbot/.config/qobuz-dl" || true
-
-            QOBUZ_CONFIG_DIR="/root/.config/qobuz-dl"
-            QOBUZ_CONFIG_FILE="$QOBUZ_CONFIG_DIR/config.ini"
-            
-            mkdir -p "$QOBUZ_CONFIG_DIR"
-            
-            # --- ВОТ ИСПРАВЛЕНИЕ ---
-            cat > "$QOBUZ_CONFIG_FILE" <<- EOF
-            [DEFAULT]
-            email = ${{ secrets.QOBUZ_LOGIN }}
-            password = ${{ secrets.QOBUZ_PASSWORD }}
-            default_folder =
-            default_quality = 27
-            default_limit = none
-            no_m3u = true
-            albums_only = false
-            no_fallback = true
-            og_cover = true
-            embed_art = true
-            no_cover = false
-            no_database = true
-            EOF
-            # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-            
-            echo "✅ config.ini для Qobuz создан в /root/.config/."
+            # --- БЛОК QOBUZ УДАЛЕН ---
+            # Конфигурация Qobuz теперь выполняется вручную на сервере
+            # командой 'qobuz-dl -r' и больше не перезаписывается.
+            echo "⚙️ Пропуск создания config.ini (управляется вручную)."
 
             echo "🐍 Настройка виртуального окружения..."
             if [ ! -d "venv" ]; then
