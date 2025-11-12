@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 from config import Config
 import logging
 import os
-import subprocess
+import subprocess  # <-- Используем subprocess
 import re
 import sys
 import shutil
@@ -27,18 +27,24 @@ class QobuzDownloader:
             if item.is_file(): item.unlink()
             elif item.is_dir(): shutil.rmtree(item)
         try:
+            # Ищем qobuz-dl внутри venv, запущенного systemd
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
             command = [
                 str(qobuz_dl_path), "lucky", query, 
                 "--type", "track", "--no-db", "-d", str(self.download_dir)
             ]
+            
+            # Выполняем как команду
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+            
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl lucky' завершилась с ошибкой: {result.stderr}")
                 return None, None
+            
             logger.info("✅ Команда 'lucky' выполнена. Ищем результат...")
             return self._find_downloaded_files()
+        
         except Exception as e:
             logger.error(f"❌ Ошибка при поиске и скачивании через 'lucky': {e}")
             return None, None
@@ -46,8 +52,7 @@ class QobuzDownloader:
     async def download_track(self, url: str, quality_id: int) -> Tuple[Optional[Path], Optional[Path]]:
         logger.info(f"⬇️ Запуск скачивания через CLI для URL: {url} с качеством ID: {quality_id}")
         try:
-            # --- ЭТО КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ---
-            # Ищем qobuz-dl внутри виртуального окружения venv
+            # Ищем qobuz-dl внутри venv, запущенного systemd
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
             
@@ -63,7 +68,7 @@ class QobuzDownloader:
                 "-d", str(self.download_dir)
             ]
             
-            # Запускаем CLI как подпроцесс
+            # Выполняем как команду
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
             
             if result.returncode != 0:
@@ -87,6 +92,7 @@ class QobuzDownloader:
                         f"Попытка обхода каталога! Файл '{f}' вне рабочей директории. Пропускаем."
                     )
                     continue
+                # Исправляем путь к обложке
                 cover_file = f.parent / "cover.jpg"
                 return f, cover_file if cover_file.exists() else None
         return None, None
