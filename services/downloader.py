@@ -46,23 +46,33 @@ class QobuzDownloader:
     async def download_track(self, url: str, quality_id: int) -> Tuple[Optional[Path], Optional[Path]]:
         logger.info(f"⬇️ Запуск скачивания через CLI для URL: {url} с качеством ID: {quality_id}")
         try:
+            # --- ЭТО КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ---
+            # Ищем qobuz-dl внутри виртуального окружения venv
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
+            
+            # Очистка папки перед скачиванием
             for item in self.download_dir.glob("**/*"):
                 if item.is_file(): item.unlink()
                 elif item.is_dir(): shutil.rmtree(item)
+            
             command = [
                 str(qobuz_dl_path), "dl", url,
                 "-q", str(quality_id),
                 "--embed-art", "--no-db",
                 "-d", str(self.download_dir)
             ]
+            
+            # Запускаем CLI как подпроцесс
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+            
             if result.returncode != 0:
                 logger.error(f"❌ Команда 'qobuz-dl dl' завершилась с ошибкой: {result.stderr}")
                 return None, None
+            
             logger.info("✅ Скачивание через CLI завершено. Поиск файлов...")
             return self._find_downloaded_files()
+        
         except Exception as e:
             logger.error(f"❌ Ошибка при скачивании через CLI: {e}")
             return None, None
