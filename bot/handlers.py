@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 import shutil
 import mutagen 
 import asyncio # Импорт нужен для asyncio.get_running_loop() и run_in_executor
+from io import BytesIO # <-- ДОБАВЛЕНО для работы с байтами
 
 logger = logging.getLogger(__name__)
 
@@ -322,14 +323,24 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
 
     sent_message = await message.reply_text("🔎 Получил аудио, пытаюсь распознать...")
     temp_file_path = None
-    converted_file_path = None # <-- ДОБАВЛЕНО
+    converted_file_path = None 
     
     try:
-        temp_audio_file = await audio_source.get_file()
-        temp_file_path = Path(f"{temp_audio_file.file_id}{Path(temp_audio_file.file_path).suffix or '.ogg'}")
-        await temp_audio_file.download_to_drive(temp_file_path)
+        file_obj = await audio_source.get_file()
         
-        # --- НАЧАЛО ИСПРАВЛЕНИЯ: Конвертация в MP3 ---
+        # --- НАЧАЛО ИСПРАВЛЕНИЯ: Асинхронное скачивание в байты и сохранение на диск ---
+        await sent_message.edit_text("⏳ Скачиваю аудио...")
+        # Скачиваем файл асинхронно в память
+        file_bytes = await file_obj.download_as_bytearray() 
+        
+        temp_file_path = Path(f"{file_obj.file_id}{Path(file_obj.file_path).suffix or '.ogg'}")
+        
+        # Сохраняем байты на диск (синхронная операция в executor)
+        loop = context.application.loop 
+        await loop.run_in_executor(None, temp_file_path.write_bytes, bytes(file_bytes))
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+        
+        # --- БЛОК КОНВЕРТАЦИИ В MP3 (включая удаление, как в предыдущем исправлении) ---
         converted_file_path = temp_file_path.with_suffix(".mp3")
         await sent_message.edit_text("⏳ Конвертирую аудио для распознавания...")
         
@@ -339,11 +350,10 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
         ]
         
         # Запуск блокирующей операции в executor
-        loop = context.application.loop # Используем цикл приложения
         await loop.run_in_executor(None, subprocess.run, command, {"check": True, "capture_output": True})
         
         file_to_recognize = converted_file_path
-        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+        # ----------------------------------------
         
         recognizer = AudioRecognizer()
         # Отправляем на распознавание сконвертированный файл
@@ -357,10 +367,6 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
         await sent_message.edit_text(f"✅ Распознано: `{artist} - {title}`. Ищу и скачиваю с Qobuz...", parse_mode='Markdown')
         
         downloader = QobuzDownloader()
-        # Важно: Вызов search_and_download_lucky в этом месте является блокирующим 
-        # (так как не объявлен как async в services/downloader.py). 
-        # Если это будет проблемой, необходимо переделать services/downloader.py.
-        # Однако, пока оставляем как есть, предполагая, что это синхронный вызов.
         audio_file, cover_file = downloader.search_and_download_lucky(artist, title)
         
         if not audio_file:
