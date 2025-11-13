@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 import shutil
 import mutagen 
+import asyncio # Импорт нужен для asyncio.get_running_loop() и run_in_executor
 
 logger = logging.getLogger(__name__)
 
@@ -312,29 +313,41 @@ def _get_metadata_from_qobuz_path(audio_file: Path) -> dict:
         return {}
 
 
-# --- РАСПОЗНАВАНИЕ АУДИО (без изменений) ---
+# --- РАСПОЗНАВАНИЕ АУДИО (ИСПРАВЛЕНО) ---
 
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     audio_source = message.audio or message.voice
     if not audio_source: return
 
-    # --- НОВАЯ ПРОВЕРКА РАЗМЕРА ФАЙЛА ---
-    # telegram-bot-api предоставляет информацию о размере файла
-    if audio_source.file_size > 2000 * 1024 * 1024: 
-        await message.reply_text("❌ Файл слишком большой для обработки (лимит 2 ГБ).")
-        return
-    # --- КОНЕЦ ПРОВЕРКИ ---
-
     sent_message = await message.reply_text("🔎 Получил аудио, пытаюсь распознать...")
     temp_file_path = None
+    converted_file_path = None # <-- ДОБАВЛЕНО
+    
     try:
         temp_audio_file = await audio_source.get_file()
         temp_file_path = Path(f"{temp_audio_file.file_id}{Path(temp_audio_file.file_path).suffix or '.ogg'}")
         await temp_audio_file.download_to_drive(temp_file_path)
         
+        # --- НАЧАЛО ИСПРАВЛЕНИЯ: Конвертация в MP3 ---
+        converted_file_path = temp_file_path.with_suffix(".mp3")
+        await sent_message.edit_text("⏳ Конвертирую аудио для распознавания...")
+        
+        command = [
+            "ffmpeg", "-i", str(temp_file_path), "-vn", "-acodec", "libmp3lame", 
+            "-b:a", "192k", str(converted_file_path)
+        ]
+        
+        # Запуск блокирующей операции в executor
+        loop = context.application.loop # Используем цикл приложения
+        await loop.run_in_executor(None, subprocess.run, command, {"check": True, "capture_output": True})
+        
+        file_to_recognize = converted_file_path
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+        
         recognizer = AudioRecognizer()
-        track_info = recognizer.recognize(str(temp_file_path))
+        # Отправляем на распознавание сконвертированный файл
+        track_info = recognizer.recognize(str(file_to_recognize))
         
         if not track_info:
             await sent_message.edit_text("❌ К сожалению, не удалось распознать этот трек.")
@@ -344,6 +357,10 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
         await sent_message.edit_text(f"✅ Распознано: `{artist} - {title}`. Ищу и скачиваю с Qobuz...", parse_mode='Markdown')
         
         downloader = QobuzDownloader()
+        # Важно: Вызов search_and_download_lucky в этом месте является блокирующим 
+        # (так как не объявлен как async в services/downloader.py). 
+        # Если это будет проблемой, необходимо переделать services/downloader.py.
+        # Однако, пока оставляем как есть, предполагая, что это синхронный вызов.
         audio_file, cover_file = downloader.search_and_download_lucky(artist, title)
         
         if not audio_file:
@@ -363,3 +380,7 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
     finally:
         if temp_file_path and temp_file_path.exists():
             temp_file_path.unlink()
+        # --- ДОБАВЛЕНО УДАЛЕНИЕ СКОНВЕРТИРОВАННОГО ФАЙЛА ---
+        if converted_file_path and converted_file_path.exists():
+            converted_file_path.unlink()
+        # --- КОНЕЦ ДОБАВЛЕНИЯ ---
