@@ -319,6 +319,13 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
     audio_source = message.audio or message.voice
     if not audio_source: return
 
+    # --- НОВАЯ ПРОВЕРКА РАЗМЕРА ФАЙЛА ---
+    # telegram-bot-api предоставляет информацию о размере файла
+    if audio_source.file_size > 2000 * 1024 * 1024: 
+        await message.reply_text("❌ Файл слишком большой для обработки (лимит 2 ГБ).")
+        return
+    # --- КОНЕЦ ПРОВЕРКИ ---
+
     sent_message = await message.reply_text("🔎 Получил аудио, пытаюсь распознать...")
     temp_file_path = None
     try:
