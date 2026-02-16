@@ -21,49 +21,60 @@ class QobuzDownloader:
 
     async def get_album_info(self, url: str) -> Optional[Dict]:
         """Парсит страницу альбома и возвращает информацию и список треков."""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+        }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=15, headers=headers) as client:
                 response = await client.get(url, follow_redirects=True)
                 if response.status_code != 200:
+                    logger.warning(f"⚠️ Qobuz вернул статус {response.status_code} для {url}")
                     return None
                 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
                 # Парсим название альбома и артиста
-                album_title = soup.find('h1', class_='album-meta__title')
-                artist_name = soup.find('span', class_='album-meta__artist')
+                album_title = soup.find('h1', class_='album-meta__title') or soup.find('h1')
+                artist_name = soup.find('span', class_='album-meta__artist') or soup.find('div', class_='album-meta__artist')
                 
                 title = album_title.text.strip() if album_title else "Unknown Album"
                 artist = artist_name.text.strip() if artist_name else "Unknown Artist"
                 
-                # Парсим треки
+                # Поиск треков (несколько вариантов селекторов)
                 tracks = []
-                track_elements = soup.find_all('div', class_='track-item')
+                
+                # Вариант 1 (Desktop версия)
+                track_elements = soup.select('.track-item') or soup.select('.tracklist__item')
                 
                 for i, track in enumerate(track_elements, 1):
-                    # Ищем название трека внутри элемента
-                    name_elem = track.find('div', class_='track-item__title')
+                    name_elem = track.find('div', class_='track-item__title') or track.select_one('.tracklist__item-title')
                     if name_elem:
                         tracks.append({
                             'index': i,
                             'title': name_elem.text.strip()
                         })
                 
-                # Если через классы не нашлось, попробуем другой способ (Qobuz меняет верстку)
+                # Вариант 2 (Если первый не сработал)
                 if not tracks:
-                    # Поиск всех элементов, похожих на названия треков
-                    # В новой верстке Qobuz часто используются другие классы
-                    possible_tracks = soup.select('.tracklist__item-title') or soup.select('.track-name')
-                    for i, track in enumerate(possible_tracks, 1):
-                        tracks.append({
-                            'index': i,
-                            'title': track.text.strip()
-                        })
+                    track_names = soup.select('.track-name') or soup.select('[itemprop="name"]')
+                    for i, track in enumerate(track_names, 1):
+                        # Исключаем главный заголовок альбома из списка треков
+                        if track.text.strip() != title:
+                            tracks.append({
+                                'index': i,
+                                'title': track.text.strip()
+                            })
 
+                if not tracks:
+                    logger.warning(f"⚠️ Не удалось найти треки на странице {url}. Проверьте парсер.")
+                    return None
+
+                logger.info(f"✅ Найдено {len(tracks)} треков для альбома: {artist} - {title}")
                 return {
                     'title': title,
                     'artist': artist,
-                    'tracks': tracks[:50] # Ограничим 50 треками для кнопок
+                    'tracks': tracks[:50]
                 }
         except Exception as e:
             logger.error(f"❌ Ошибка при парсинге страницы альбома: {e}")
@@ -119,7 +130,6 @@ class QobuzDownloader:
                 "-d", str(self.download_dir)
             ]
             
-            # Если указан конкретный трек в альбоме
             if track_index is not None:
                 command.extend(["--select", str(track_index)])
             
@@ -198,4 +208,3 @@ class QobuzDownloader:
                     
                 return f, cover_file if cover_file and cover_file.exists() else None
         return None, None
-
