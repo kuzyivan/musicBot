@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Tuple, Callable, Awaitable
+from typing import Optional, Tuple, Callable, Awaitable, List, Dict
 from config import Config
 import logging
 import os
@@ -8,6 +8,8 @@ import re
 import sys
 import shutil
 import shlex
+import httpx
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,56 @@ class QobuzDownloader:
         self.download_dir = Config.DOWNLOAD_DIR
         self.download_dir.mkdir(parents=True, exist_ok=True)
         logger.info("✅ Сервис загрузки Qobuz (CLI) инициализирован.")
+
+    async def get_album_info(self, url: str) -> Optional[Dict]:
+        """Парсит страницу альбома и возвращает информацию и список треков."""
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(url, follow_redirects=True)
+                if response.status_code != 200:
+                    return None
+                
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Парсим название альбома и артиста
+                album_title = soup.find('h1', class_='album-meta__title')
+                artist_name = soup.find('span', class_='album-meta__artist')
+                
+                title = album_title.text.strip() if album_title else "Unknown Album"
+                artist = artist_name.text.strip() if artist_name else "Unknown Artist"
+                
+                # Парсим треки
+                tracks = []
+                track_elements = soup.find_all('div', class_='track-item')
+                
+                for i, track in enumerate(track_elements, 1):
+                    # Ищем название трека внутри элемента
+                    name_elem = track.find('div', class_='track-item__title')
+                    if name_elem:
+                        tracks.append({
+                            'index': i,
+                            'title': name_elem.text.strip()
+                        })
+                
+                # Если через классы не нашлось, попробуем другой способ (Qobuz меняет верстку)
+                if not tracks:
+                    # Поиск всех элементов, похожих на названия треков
+                    # В новой верстке Qobuz часто используются другие классы
+                    possible_tracks = soup.select('.tracklist__item-title') or soup.select('.track-name')
+                    for i, track in enumerate(possible_tracks, 1):
+                        tracks.append({
+                            'index': i,
+                            'title': track.text.strip()
+                        })
+
+                return {
+                    'title': title,
+                    'artist': artist,
+                    'tracks': tracks[:50] # Ограничим 50 треками для кнопок
+                }
+        except Exception as e:
+            logger.error(f"❌ Ошибка при парсинге страницы альбома: {e}")
+            return None
 
     async def search_and_download_lucky(
         self, 
@@ -50,7 +102,8 @@ class QobuzDownloader:
         self, 
         url: str, 
         quality_id: int, 
-        progress_callback: Optional[Callable[[float], Awaitable[None]]] = None
+        progress_callback: Optional[Callable[[float], Awaitable[None]]] = None,
+        track_index: Optional[int] = None
     ) -> Tuple[Optional[Path], Optional[Path]]:
         logger.info(f"⬇️ Запуск скачивания через CLI для URL: {url} с качеством ID: {quality_id}")
         try:
@@ -65,6 +118,10 @@ class QobuzDownloader:
                 "--embed-art", "--no-db",
                 "-d", str(self.download_dir)
             ]
+            
+            # Если указан конкретный трек в альбоме
+            if track_index is not None:
+                command.extend(["--select", str(track_index)])
             
             return await self._run_qobuz_dl(command, progress_callback)
         
@@ -83,7 +140,6 @@ class QobuzDownloader:
         progress_callback: Optional[Callable[[float], Awaitable[None]]] = None
     ) -> Tuple[Optional[Path], Optional[Path]]:
         """Запускает qobuz-dl и парсит прогресс."""
-        # Объединяем stderr и stdout
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
@@ -101,12 +157,10 @@ class QobuzDownloader:
             char = char_bytes.decode('utf-8', errors='ignore')
             if char in ['\r', '\n']:
                 line = buffer.strip()
-                # Более гибкий поиск процентов
                 match = re.search(r'(\d+(\.\d+)?)%', line)
                 if match and progress_callback:
                     try:
                         percent = float(match.group(1))
-                        # Обновляем каждые 2% или в самом конце
                         if percent - last_percent >= 2.0 or percent >= 99.0 or percent < last_percent:
                             await progress_callback(percent)
                             last_percent = percent
@@ -135,10 +189,8 @@ class QobuzDownloader:
                         f"Попытка обхода каталога! Файл '{f}' вне рабочей директории. Пропускаем."
                     )
                     continue
-                # Ищем обложку в той же папке
                 cover_file = f.parent / "cover.jpg"
                 if not cover_file.exists():
-                    # Иногда qobuz-dl может назвать иначе или не скачать
                     cover_files = list(f.parent.glob("*.jpg")) + list(f.parent.glob("*.png"))
                     cover_file = cover_files[0] if cover_files else None
                 else:
@@ -146,3 +198,4 @@ class QobuzDownloader:
                     
                 return f, cover_file if cover_file and cover_file.exists() else None
         return None, None
+

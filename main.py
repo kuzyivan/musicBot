@@ -46,11 +46,14 @@ def main():
         .write_timeout(120)
         .build()
     )
-    # --- КОНЕЦ ОКОНЧАТЕЛЬНОГО ИСПРАВЛЕНИЯ ---
-
+    # --- ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ ---
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("download", handle_download))
+    
+    # Добавляем обработчик callback-запросов (нажатия кнопок)
+    from bot.handlers import handle_callback_query
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
     
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.Regex(r"https?:\/\/(open|play)\.(qobuz|spotify)\.com\/"), 
