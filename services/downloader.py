@@ -4,7 +4,6 @@ from config import Config
 import logging
 import os
 import asyncio
-import subprocess
 import re
 import sys
 import shutil
@@ -30,9 +29,7 @@ class QobuzDownloader:
         query = f"{safe_artist} {safe_title}"
         logger.info(f"🔍 Поиск и скачивание на Qobuz через 'lucky': '{query}'")
         
-        for item in self.download_dir.glob("**/*"):
-            if item.is_file(): item.unlink()
-            elif item.is_dir(): shutil.rmtree(item)
+        self._clear_download_dir()
             
         try:
             venv_path = Path(sys.executable).parent.parent
@@ -60,9 +57,7 @@ class QobuzDownloader:
             venv_path = Path(sys.executable).parent.parent
             qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
             
-            for item in self.download_dir.glob("**/*"):
-                if item.is_file(): item.unlink()
-                elif item.is_dir(): shutil.rmtree(item)
+            self._clear_download_dir()
             
             command = [
                 str(qobuz_dl_path), "dl", url,
@@ -77,23 +72,28 @@ class QobuzDownloader:
             logger.error(f"❌ Ошибка при скачивании через CLI: {e}")
             return None, None
 
+    def _clear_download_dir(self):
+        for item in self.download_dir.glob("**/*"):
+            if item.is_file(): item.unlink()
+            elif item.is_dir(): shutil.rmtree(item)
+
     async def _run_qobuz_dl(
         self, 
         command: list, 
         progress_callback: Optional[Callable[[float], Awaitable[None]]] = None
     ) -> Tuple[Optional[Path], Optional[Path]]:
         """Запускает qobuz-dl и парсит прогресс."""
+        # Объединяем stderr и stdout
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.STDOUT
         )
 
         last_percent = -1.0
         buffer = ""
         
         while True:
-            # Читаем по одному байту, чтобы ловить \r
             char_bytes = await process.stdout.read(1)
             if not char_bytes:
                 break
@@ -101,13 +101,13 @@ class QobuzDownloader:
             char = char_bytes.decode('utf-8', errors='ignore')
             if char in ['\r', '\n']:
                 line = buffer.strip()
-                # Парсинг процентов: ищем что-то вроде [45.2%] или просто 45.2%
-                match = re.search(r'(\d+\.?\d*)\s*%', line)
+                # Более гибкий поиск процентов
+                match = re.search(r'(\d+(\.\d+)?)%', line)
                 if match and progress_callback:
                     try:
                         percent = float(match.group(1))
-                        # Обновляем только если процент изменился на 5% или более
-                        if percent - last_percent >= 5.0 or percent >= 99.0:
+                        # Обновляем каждые 2% или в самом конце
+                        if percent - last_percent >= 2.0 or percent >= 99.0 or percent < last_percent:
                             await progress_callback(percent)
                             last_percent = percent
                     except ValueError:
@@ -119,8 +119,7 @@ class QobuzDownloader:
         await process.wait()
         
         if process.returncode != 0:
-            stderr_data = await process.stderr.read()
-            logger.error(f"❌ Команда qobuz-dl завершилась с ошибкой: {stderr_data.decode()}")
+            logger.error(f"❌ Команда qobuz-dl завершилась с ошибкой (код {process.returncode})")
             return None, None
             
         logger.info("✅ Команда выполнена. Ищем результат...")
@@ -136,21 +135,14 @@ class QobuzDownloader:
                         f"Попытка обхода каталога! Файл '{f}' вне рабочей директории. Пропускаем."
                     )
                     continue
+                # Ищем обложку в той же папке
                 cover_file = f.parent / "cover.jpg"
-                return f, cover_file if cover_file.exists() else None
-        return None, None
-
-    def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
-        for f in self.download_dir.glob("**/*.*"):
-            if f.is_file() and f.suffix in {".flac", ".mp3", ".m4a", ".wav"}:
-                try:
-                    f.resolve().relative_to(self.download_dir.resolve())
-                except ValueError:
-                    logger.warning(
-                        f"Попытка обхода каталога! Файл '{f}' вне рабочей директории. Пропускаем."
-                    )
-                    continue
-                # Исправляем путь к обложке
-                cover_file = f.parent / "cover.jpg"
-                return f, cover_file if cover_file.exists() else None
+                if not cover_file.exists():
+                    # Иногда qobuz-dl может назвать иначе или не скачать
+                    cover_files = list(f.parent.glob("*.jpg")) + list(f.parent.glob("*.png"))
+                    cover_file = cover_files[0] if cover_files else None
+                else:
+                    cover_file = cover_file
+                    
+                return f, cover_file if cover_file and cover_file.exists() else None
         return None, None

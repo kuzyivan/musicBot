@@ -118,7 +118,6 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
                         text=f"{base_text}{progress_bar}"
                     )
                 except Exception:
-                    # Игнорируем ошибки обновления (например, если сообщение не изменилось)
                     pass
 
             audio_file, cover_file = await downloader.download_track(
@@ -215,7 +214,6 @@ async def process_and_send_audio(
         
         audio_file_to_send = initial_audio_file
         
-        # --- ИЗМЕНЕНИЕ: Используем Config.MAX_FILE_SIZE_MB (2000 МБ) вместо 48 МБ ---
         if size_mb > Config.MAX_FILE_SIZE_MB: 
             await sent_message.edit_text(f"🎧 Файл слишком большой ({size_mb:.2f} MB). Конвертирую в MP3...")
             converted_file = convert_to_mp3(initial_audio_file)
@@ -273,7 +271,6 @@ async def process_and_send_audio(
                     parse_mode='Markdown'
                 )
         else:
-            # 3. Если обложки нет, просто отправляем подпись текстом
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=caption_text,
@@ -290,7 +287,6 @@ async def process_and_send_audio(
 
 
 def _get_metadata_from_file(file_path: Path) -> dict:
-    """Читает ID3-теги (для MP3 от Savify) или FLAC-теги."""
     details = {}
     try:
         audio = mutagen.File(file_path)
@@ -316,7 +312,6 @@ def _get_metadata_from_file(file_path: Path) -> dict:
 
 
 def _get_metadata_from_qobuz_path(audio_file: Path) -> dict:
-    """Ваша старая логика парсинга пути Qobuz (как запасной вариант)."""
     try:
         original_name = Path(str(audio_file).replace(".mp3", ".flac")).name
         album_folder = audio_file.parent.name
@@ -330,8 +325,6 @@ def _get_metadata_from_qobuz_path(audio_file: Path) -> dict:
         return {}
 
 
-# --- РАСПОЗНАВАНИЕ АУДИО (ИСПРАВЛЕНО) ---
-
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     audio_source = message.audio or message.voice
@@ -343,20 +336,13 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
     
     try:
         file_obj = await audio_source.get_file()
-        
-        # --- НАЧАЛО ИСПРАВЛЕНИЯ: Асинхронное скачивание в байты и сохранение на диск ---
         await sent_message.edit_text("⏳ Скачиваю аудио...")
-        # Скачиваем файл асинхронно в память
         file_bytes = await file_obj.download_as_bytearray() 
         
         temp_file_path = Path(f"{file_obj.file_id}{Path(file_obj.file_path).suffix or '.ogg'}")
-        
-        # Сохраняем байты на диск (синхронная операция в executor)
         loop = context.application.loop 
         await loop.run_in_executor(None, temp_file_path.write_bytes, bytes(file_bytes))
-        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         
-        # --- БЛОК КОНВЕРТАЦИИ В MP3 (включая удаление, как в предыдущем исправлении) ---
         converted_file_path = temp_file_path.with_suffix(".mp3")
         await sent_message.edit_text("⏳ Конвертирую аудио для распознавания...")
         
@@ -365,14 +351,11 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
             "-b:a", "192k", str(converted_file_path)
         ]
         
-        # Запуск блокирующей операции в executor
         await loop.run_in_executor(None, subprocess.run, command, {"check": True, "capture_output": True})
         
         file_to_recognize = converted_file_path
-        # ----------------------------------------
         
         recognizer = AudioRecognizer()
-        # Отправляем на распознавание сконвертированный файл
         track_info = recognizer.recognize(str(file_to_recognize))
         
         if not track_info:
@@ -380,10 +363,27 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
             return
 
         artist, title = track_info['artist'], track_info['title']
-        await sent_message.edit_text(f"✅ Распознано: `{artist} - {title}`. Ищу и скачиваю с Qobuz...", parse_mode='Markdown')
+        base_text = f"✅ Распознано: `{artist} - {title}`\n"
+        await sent_message.edit_text(f"{base_text}🔎 Ищу на Qobuz...", parse_mode='Markdown')
         
         downloader = QobuzDownloader()
-        audio_file, cover_file = downloader.search_and_download_lucky(artist, title)
+        file_manager = FileManager()
+
+        async def progress_callback(percent):
+            progress_bar = file_manager.format_progress_bar(percent)
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=sent_message.message_id,
+                    text=f"{base_text}💿 Скачиваю: {progress_bar}",
+                    parse_mode='Markdown'
+                )
+            except Exception:
+                pass
+
+        audio_file, cover_file = await downloader.search_and_download_lucky(
+            artist, title, progress_callback=progress_callback
+        )
         
         if not audio_file:
             await sent_message.edit_text(f"❌ Трек `{artist} - {title}` не найден на Qobuz.", parse_mode='Markdown')
@@ -402,7 +402,5 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
     finally:
         if temp_file_path and temp_file_path.exists():
             temp_file_path.unlink()
-        # --- ДОБАВЛЕНО УДАЛЕНИЕ СКОНВЕРТИРОВАННОГО ФАЙЛА ---
         if converted_file_path and converted_file_path.exists():
             converted_file_path.unlink()
-        # --- КОНЕЦ ДОБАВЛЕНИЯ ---
