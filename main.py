@@ -1,7 +1,7 @@
 # main.py
 
 import logging
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 # HTTPXRequest больше не нужен, если мы используем base_url
 # from telegram.request import HTTPXRequest 
 
