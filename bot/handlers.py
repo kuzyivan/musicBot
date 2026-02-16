@@ -97,17 +97,33 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
     Логика скачивания с Qobuz.
     """
     downloader = QobuzDownloader()
+    file_manager = FileManager()
     sent_message = await update.message.reply_text("⏳ Начинаю поиск на Qobuz...")
     
     try:
         for quality_name, quality_id in QUALITY_HIERARCHY.items():
+            base_text = f"💿 Qobuz: Качество {quality_name}\n"
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id, 
                 message_id=sent_message.message_id, 
-                text=f"💿 Qobuz: Пробую скачать в качестве: {quality_name}..."
+                text=f"{base_text}⏳ Подготовка к скачиванию..."
             )
             
-            audio_file, cover_file = await downloader.download_track(url, quality_id)
+            async def progress_callback(percent):
+                progress_bar = file_manager.format_progress_bar(percent)
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=update.effective_chat.id,
+                        message_id=sent_message.message_id,
+                        text=f"{base_text}{progress_bar}"
+                    )
+                except Exception:
+                    # Игнорируем ошибки обновления (например, если сообщение не изменилось)
+                    pass
+
+            audio_file, cover_file = await downloader.download_track(
+                url, quality_id, progress_callback=progress_callback
+            )
             
             if audio_file:
                 await process_and_send_audio(
