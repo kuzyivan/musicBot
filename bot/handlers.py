@@ -229,9 +229,32 @@ async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_T
             f"📥 [Скачано с {source}]({url_for_caption})"
         )
 
+        # 1. ОТПРАВЛЯЕМ ОБЛОЖКУ С КРАСИВОЙ ПОДПИСЬЮ
+        if initial_cover_file and initial_cover_file.exists():
+            with open(initial_cover_file, 'rb') as img:
+                await context.bot.send_photo(
+                    chat_id=chat_id, 
+                    photo=img, 
+                    caption=caption_text, 
+                    parse_mode='Markdown'
+                )
+        else:
+            # Если обложки нет, отправляем только текст
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=caption_text, 
+                parse_mode='Markdown'
+            )
+
+        # 2. ОТПРАВЛЯЕМ АУДИОФАЙЛ
         with open(audio_file_to_send, 'rb') as f:
-            await context.bot.send_audio(chat_id=chat_id, audio=f, caption=caption_text, parse_mode='Markdown', filename=custom_filename)
+            await context.bot.send_audio(
+                chat_id=chat_id, 
+                audio=f, 
+                filename=custom_filename
+            )
         
+        # Удаляем сервисное сообщение
         await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
     finally:
         for f in files_to_delete: file_manager.safe_remove(f)
