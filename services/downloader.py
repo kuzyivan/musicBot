@@ -90,22 +90,31 @@ class QobuzDownloader:
         )
 
         last_percent = -1.0
+        buffer = ""
         
         while True:
-            line_bytes = await process.stdout.readline()
-            if not line_bytes:
+            # Читаем по одному байту, чтобы ловить \r
+            char_bytes = await process.stdout.read(1)
+            if not char_bytes:
                 break
             
-            line = line_bytes.decode('utf-8', errors='ignore').strip()
-            
-            # Парсинг процентов: ищем что-то вроде [45.2%]
-            match = re.search(r'\[(\d+\.?\d*)%\]', line)
-            if match and progress_callback:
-                percent = float(match.group(1))
-                # Обновляем только если процент изменился существенно (на 1% или более)
-                if percent - last_percent >= 5.0 or percent >= 99.0:
-                    await progress_callback(percent)
-                    last_percent = percent
+            char = char_bytes.decode('utf-8', errors='ignore')
+            if char in ['\r', '\n']:
+                line = buffer.strip()
+                # Парсинг процентов: ищем что-то вроде [45.2%] или просто 45.2%
+                match = re.search(r'(\d+\.?\d*)\s*%', line)
+                if match and progress_callback:
+                    try:
+                        percent = float(match.group(1))
+                        # Обновляем только если процент изменился на 5% или более
+                        if percent - last_percent >= 5.0 or percent >= 99.0:
+                            await progress_callback(percent)
+                            last_percent = percent
+                    except ValueError:
+                        pass
+                buffer = ""
+            else:
+                buffer += char
 
         await process.wait()
         
