@@ -1,6 +1,7 @@
 # main.py
 
 import logging
+from telegram import BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 # HTTPXRequest больше не нужен, если мы используем base_url
 # from telegram.request import HTTPXRequest 
@@ -68,10 +69,21 @@ def main():
     
     app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE, handle_audio_recognition))
 
+    async def post_init(application):
+        await application.bot.set_my_commands([
+            BotCommand("start",       "Приветствие"),
+            BotCommand("help",        "Помощь"),
+            BotCommand("download",    "Скачать трек по ссылке"),
+            BotCommand("users",       "Список разрешённых пользователей"),
+            BotCommand("adduser",     "Добавить пользователя в whitelist"),
+            BotCommand("removeuser",  "Удалить пользователя из whitelist"),
+            BotCommand("settoken",    "Обновить токен Qobuz"),
+        ])
+
+    app.post_init = post_init
+
     app.run_polling(
-        # Устанавливаем таймаут polling-а в 60 секунд (стандартное значение Telegram)
-        # Это должно соответствовать таймаутам соединения, которые вы указали выше.
-        poll_interval=0, 
+        poll_interval=0,
         timeout=60
     )
 
