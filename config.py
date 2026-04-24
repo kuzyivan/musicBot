@@ -26,6 +26,12 @@ class Config:
 
     ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 
+    ALLOWED_USERS: set = {
+        int(uid.strip())
+        for uid in os.getenv("ALLOWED_USERS", "").split(",")
+        if uid.strip().isdigit()
+    }
+
     
 
     # Переменная для AudD.io

@@ -1,7 +1,8 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
 from telegram.ext import ContextTypes, CallbackQueryHandler
 from services.downloader import QobuzDownloader, QobuzAuthError
-from services.savify_downloader import SavifyDownloader 
+from services.savify_downloader import SavifyDownloader
 from services.file_manager import FileManager
 from services.recognizer import AudioRecognizer
 from config import Config
@@ -11,11 +12,29 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
 import shutil
-import mutagen 
-import asyncio # Импорт нужен для asyncio.get_running_loop() и run_in_executor
-from io import BytesIO # <-- ДОБАВЛЕНО для работы с байтами
+import mutagen
+import asyncio
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
+
+
+def _is_allowed(user_id: int) -> bool:
+    return user_id in Config.ALLOWED_USERS or user_id == Config.ADMIN_USER_ID
+
+
+async def _typing_loop(bot, chat_id: int, stop_event: asyncio.Event):
+    """Шлёт chat action каждые 4 сек пока идёт загрузка."""
+    while not stop_event.is_set():
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4)
+        except asyncio.TimeoutError:
+            pass
+
 
 # --- Вспомогательные функции ---
 
@@ -133,6 +152,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ЗАГРУЗКИ ---
 
 async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_allowed(update.effective_user.id):
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
     url = context.args[0] if context.args else getattr(update.message, 'text', '').strip()
     if not url: return
 
@@ -180,6 +202,9 @@ async def _show_qobuz_album_tracks(update: Update, context: ContextTypes.DEFAULT
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    if not _is_allowed(update.effective_user.id):
+        await query.edit_message_text("⛔ Нет доступа.")
+        return
     data = query.data
     if not data.startswith("qdl:"): return
     url = context.user_data.get('last_album_url')
@@ -203,19 +228,15 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
     chat_id = target_update.message.chat_id
     sent_message = await context.bot.send_message(chat_id=chat_id, text="⏳ Подготовка к скачиванию...")
     
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
     try:
         for quality_name, quality_id in QUALITY_HIERARCHY.items():
             base_text = f"💿 Qobuz: Качество {quality_name}\n"
             if track_index: base_text += f"🎵 Трек №{track_index}\n"
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"{base_text}⏳ Подготовка...")
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"{base_text}⏳ Скачиваю...")
 
-            async def progress_callback(percent):
-                progress_bar = file_manager.format_progress_bar(percent)
-                try:
-                    await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"{base_text}{progress_bar}")
-                except Exception: pass
-
-            audio_file, cover_file = await downloader.download_track(url, quality_id, progress_callback=progress_callback, track_index=track_index)
+            audio_file, cover_file = await downloader.download_track(url, quality_id, track_index=track_index)
             if audio_file:
                 await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url, "Qobuz")
                 return
@@ -225,6 +246,9 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
     except Exception as e:
         logger.exception(f"❌ Qobuz: Ошибка: {e}")
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Qobuz: Ошибка: {e}")
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
 
 
 async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
@@ -345,6 +369,9 @@ def _get_metadata_from_qobuz_path(audio_file: Path) -> dict:
 
 
 async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_allowed(update.effective_user.id):
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
     message = update.message
     audio_source = message.audio or message.voice
     if not audio_source: return
@@ -375,13 +402,19 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
                 await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=sent_message.message_id, text=f"✅ `{artist} - {title}`\n💿 {file_manager.format_progress_bar(percent)}", parse_mode='Markdown')
             except Exception: pass
 
-        audio_file, cover_file = await downloader.search_and_download_lucky(artist, title, progress_callback=progress_callback)
-        if audio_file:
-            await process_and_send_audio(update, context, sent_message, audio_file, cover_file, "https://qobuz.com", "Qobuz")
-        else:
-            await sent_message.edit_text("❌ Не найдено на Qobuz.")
-    except QobuzAuthError:
-        await sent_message.edit_text(_token_expired_message())
+        stop_typing = asyncio.Event()
+        typing_task = asyncio.create_task(_typing_loop(context.bot, update.effective_chat.id, stop_typing))
+        try:
+            audio_file, cover_file = await downloader.search_and_download_lucky(artist, title)
+            if audio_file:
+                await process_and_send_audio(update, context, sent_message, audio_file, cover_file, "https://qobuz.com", "Qobuz")
+            else:
+                await sent_message.edit_text("❌ Не найдено на Qobuz.")
+        except QobuzAuthError:
+            await sent_message.edit_text(_token_expired_message())
+        finally:
+            stop_typing.set()
+            typing_task.cancel()
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
         await sent_message.edit_text("❌ Ошибка.")
