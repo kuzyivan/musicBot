@@ -2,6 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes, CallbackQueryHandler
 from services.downloader import QobuzDownloader, QobuzAuthError
+from services import whitelist
 from services.savify_downloader import SavifyDownloader
 from services.file_manager import FileManager
 from services.recognizer import AudioRecognizer
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _is_allowed(user_id: int) -> bool:
-    return user_id in Config.ALLOWED_USERS or user_id == Config.ADMIN_USER_ID
+    return whitelist.is_allowed(user_id, Config.ADMIN_USER_ID)
 
 
 async def _typing_loop(bot, chat_id: int, stop_event: asyncio.Event):
@@ -141,6 +142,55 @@ async def set_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("✅ Токен Qobuz обновлён.")
     logger.info(f"🔑 Токен Qobuz обновлён пользователем {update.effective_user.id}")
+
+
+async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != Config.ADMIN_USER_ID:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+    if not context.args or not context.args[0].lstrip("-").isdigit():
+        await update.message.reply_text("Использование: /adduser <user_id>")
+        return
+    user_id = int(context.args[0])
+    if whitelist.add(user_id):
+        await update.message.reply_text(f"✅ Пользователь `{user_id}` добавлен в whitelist.", parse_mode="Markdown")
+        logger.info(f"➕ Добавлен в whitelist: {user_id}")
+    else:
+        await update.message.reply_text(f"ℹ️ Пользователь `{user_id}` уже в whitelist.", parse_mode="Markdown")
+
+
+async def remove_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != Config.ADMIN_USER_ID:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+    if not context.args or not context.args[0].lstrip("-").isdigit():
+        await update.message.reply_text("Использование: /removeuser <user_id>")
+        return
+    user_id = int(context.args[0])
+    if user_id == Config.ADMIN_USER_ID:
+        await update.message.reply_text("⛔ Нельзя удалить администратора.")
+        return
+    if whitelist.remove(user_id):
+        await update.message.reply_text(f"✅ Пользователь `{user_id}` удалён из whitelist.", parse_mode="Markdown")
+        logger.info(f"➖ Удалён из whitelist: {user_id}")
+    else:
+        await update.message.reply_text(f"ℹ️ Пользователя `{user_id}` нет в whitelist.", parse_mode="Markdown")
+
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != Config.ADMIN_USER_ID:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+    users = whitelist.all_users()
+    lines = [f"👤 Администратор: `{Config.ADMIN_USER_ID}` _(всегда разрешён)_"]
+    if users:
+        lines.append("\n📋 Whitelist:")
+        for uid in sorted(users):
+            lines.append(f"• `{uid}`")
+    else:
+        lines.append("\n📋 Whitelist пуст.")
+    lines.append(f"\n➕ /adduser <id>\n➖ /removeuser <id>")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
