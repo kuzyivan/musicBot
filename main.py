@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 # HTTPXRequest больше не нужен, если мы используем base_url
 # from telegram.request import HTTPXRequest 
 
-from bot.handlers import start, help_command, handle_download, handle_audio_recognition
+from bot.handlers import start, help_command, handle_download, handle_audio_recognition, set_token
 from config import Config
 from dotenv import load_dotenv
 
@@ -50,6 +50,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("download", handle_download))
+    app.add_handler(CommandHandler("settoken", set_token))
     
     # Добавляем обработчик callback-запросов (нажатия кнопок)
     from bot.handlers import handle_callback_query

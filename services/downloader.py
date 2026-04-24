@@ -1,192 +1,176 @@
 from pathlib import Path
-from typing import Optional, Tuple, Callable, Awaitable, List, Dict
+from typing import Optional, Tuple, Callable, Awaitable, Dict
 from config import Config
 import logging
-import os
+import sys
 import asyncio
 import re
-import sys
 import shutil
-import shlex
 import httpx
-from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
+
+QOBUZ_API = "https://www.qobuz.com/api.json/0.2"
+
+
+class QobuzAuthError(Exception):
+    pass
+QOBUZ_TO_RIP_QUALITY = {27: 4, 7: 3, 6: 2, 5: 1}
+
 
 class QobuzDownloader:
     def __init__(self):
         self.download_dir = Config.DOWNLOAD_DIR
         self.download_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("✅ Сервис загрузки Qobuz (CLI) инициализирован.")
+        self.rip_path = Path(sys.executable).parent / "rip"
+        self._headers = {
+            "X-App-Id": Config.QOBUZ_APP_ID,
+            "X-User-Auth-Token": Config.QOBUZ_AUTH_TOKEN,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0",
+        }
+        logger.info("✅ Сервис загрузки Qobuz (streamrip) инициализирован.")
 
     async def get_album_info(self, url: str) -> Optional[Dict]:
-        """Парсит страницу альбома и возвращает информацию и список треков."""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
-        }
+        album_id = self._extract_id(url)
+        if not album_id:
+            return None
         try:
-            async with httpx.AsyncClient(timeout=15, headers=headers) as client:
-                response = await client.get(url, follow_redirects=True)
-                if response.status_code != 200:
-                    logger.warning(f"⚠️ Qobuz вернул статус {response.status_code} для {url}")
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(
+                    f"{QOBUZ_API}/album/get",
+                    params={"album_id": album_id, "app_id": Config.QOBUZ_APP_ID},
+                    headers=self._headers,
+                )
+                if r.status_code != 200:
+                    logger.warning(f"⚠️ Album API вернул {r.status_code}")
                     return None
-                
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Парсим название альбома и артиста
-                album_title = soup.find('h1', class_='album-meta__title') or soup.find('h1')
-                artist_name = soup.find('span', class_='album-meta__artist') or soup.find('div', class_='album-meta__artist')
-                
-                title = album_title.text.strip() if album_title else "Unknown Album"
-                artist = artist_name.text.strip() if artist_name else "Unknown Artist"
-                
-                # Поиск треков (несколько вариантов селекторов)
-                tracks = []
-                
-                # Вариант 1 (Desktop версия)
-                track_elements = soup.select('.track-item') or soup.select('.tracklist__item')
-                
-                for i, track in enumerate(track_elements, 1):
-                    name_elem = track.find('div', class_='track-item__title') or track.select_one('.tracklist__item-title')
-                    if name_elem:
-                        tracks.append({
-                            'index': i,
-                            'title': name_elem.text.strip()
-                        })
-                
-                # Вариант 2 (Если первый не сработал)
+                data = r.json()
+                tracks = [
+                    {"index": i + 1, "title": t["title"], "id": str(t["id"])}
+                    for i, t in enumerate(data.get("tracks", {}).get("items", []))
+                ]
                 if not tracks:
-                    track_names = soup.select('.track-name') or soup.select('[itemprop="name"]')
-                    for i, track in enumerate(track_names, 1):
-                        # Исключаем главный заголовок альбома из списка треков
-                        if track.text.strip() != title:
-                            tracks.append({
-                                'index': i,
-                                'title': track.text.strip()
-                            })
-
-                if not tracks:
-                    logger.warning(f"⚠️ Не удалось найти треки на странице {url}. Проверьте парсер.")
                     return None
-
-                logger.info(f"✅ Найдено {len(tracks)} треков для альбома: {artist} - {title}")
                 return {
-                    'title': title,
-                    'artist': artist,
-                    'tracks': tracks[:50]
+                    "title": data.get("title", "Unknown Album"),
+                    "artist": data.get("artist", {}).get("name", "Unknown Artist"),
+                    "tracks": tracks[:50],
                 }
         except Exception as e:
-            logger.error(f"❌ Ошибка при парсинге страницы альбома: {e}")
+            logger.error(f"❌ Ошибка при получении информации об альбоме: {e}")
             return None
 
     async def search_and_download_lucky(
-        self, 
-        artist: str, 
-        title: str, 
-        progress_callback: Optional[Callable[[float], Awaitable[None]]] = None
+        self,
+        artist: str,
+        title: str,
+        progress_callback: Optional[Callable[[float], Awaitable[None]]] = None,
     ) -> Tuple[Optional[Path], Optional[Path]]:
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
-        safe_artist = shlex.quote(artist)
-        safe_title = shlex.quote(clean_title)
-        query = f"{safe_artist} {safe_title}"
-        logger.info(f"🔍 Поиск и скачивание на Qobuz через 'lucky': '{query}'")
-        
-        self._clear_download_dir()
-            
+        query = f"{artist} {clean_title}"
+        logger.info(f"🔍 Поиск трека на Qobuz: '{query}'")
         try:
-            venv_path = Path(sys.executable).parent.parent
-            qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
-            
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(
+                    f"{QOBUZ_API}/catalog/search",
+                    params={"query": query, "type": "tracks", "limit": 1,
+                            "app_id": Config.QOBUZ_APP_ID},
+                    headers=self._headers,
+                )
+                if r.status_code != 200:
+                    logger.warning(f"⚠️ Поиск вернул {r.status_code}: {r.text[:200]}")
+                    return None, None
+                items = r.json().get("tracks", {}).get("items", [])
+                if not items:
+                    logger.warning("⚠️ Треки не найдены")
+                    return None, None
+                track_id = items[0]["id"]
+                track_url = f"https://open.qobuz.com/track/{track_id}"
+                logger.info(f"✅ Найден трек ID={track_id}")
+
+            self._clear_download_dir()
             command = [
-                str(qobuz_dl_path), "lucky", query, 
-                "--type", "track", "--no-db", "-d", str(self.download_dir)
+                str(self.rip_path), "-f", str(self.download_dir),
+                "-q", "4", "--no-db", "--no-progress", "url", track_url,
             ]
-            
-            return await self._run_qobuz_dl(command, progress_callback)
-        
+            return await self._run_rip(command, progress_callback)
         except Exception as e:
-            logger.error(f"❌ Ошибка при поиске и скачивании через 'lucky': {e}")
+            logger.error(f"❌ Ошибка при поиске и скачивании: {e}")
             return None, None
 
     async def download_track(
-        self, 
-        url: str, 
-        quality_id: int, 
+        self,
+        url: str,
+        quality_id: int,
         progress_callback: Optional[Callable[[float], Awaitable[None]]] = None,
-        track_index: Optional[int] = None
+        track_index: Optional[int] = None,
     ) -> Tuple[Optional[Path], Optional[Path]]:
-        logger.info(f"⬇️ Запуск скачивания через CLI для URL: {url} с качеством ID: {quality_id}")
-        try:
-            venv_path = Path(sys.executable).parent.parent
-            qobuz_dl_path = venv_path / "bin" / "qobuz-dl"
-            
-            self._clear_download_dir()
-            
-            command = [
-                str(qobuz_dl_path), "dl", url,
-                "-q", str(quality_id),
-                "--embed-art", "--no-db",
-                "-d", str(self.download_dir)
-            ]
-            
-            if track_index is not None:
-                command.extend(["--select", str(track_index)])
-            
-            return await self._run_qobuz_dl(command, progress_callback)
-        
-        except Exception as e:
-            logger.error(f"❌ Ошибка при скачивании через CLI: {e}")
-            return None, None
+        rip_quality = QOBUZ_TO_RIP_QUALITY.get(quality_id, 3)
+        logger.info(f"⬇️ Скачивание: {url} (rip quality={rip_quality})")
+
+        download_url = url
+        if track_index is not None and "/album/" in url:
+            album_info = await self.get_album_info(url)
+            if album_info and len(album_info["tracks"]) >= track_index:
+                track_id = album_info["tracks"][track_index - 1]["id"]
+                download_url = f"https://open.qobuz.com/track/{track_id}"
+                logger.info(f"🎵 Трек №{track_index}: ID={track_id}")
+
+        self._clear_download_dir()
+        command = [
+            str(self.rip_path), "-f", str(self.download_dir),
+            "-q", str(rip_quality), "--no-db", "--no-progress",
+            "url", download_url,
+        ]
+        return await self._run_rip(command, progress_callback)
+
+    def _extract_id(self, url: str) -> Optional[str]:
+        m = re.search(r'/(?:album|track)/(\w+)', url)
+        return m.group(1) if m else None
 
     def _clear_download_dir(self):
         for item in self.download_dir.glob("**/*"):
-            if item.is_file(): item.unlink()
-            elif item.is_dir(): shutil.rmtree(item)
+            if item.is_file():
+                item.unlink()
+            elif item.is_dir():
+                shutil.rmtree(item)
 
-    async def _run_qobuz_dl(
-        self, 
-        command: list, 
-        progress_callback: Optional[Callable[[float], Awaitable[None]]] = None
+    async def _run_rip(
+        self,
+        command: list,
+        progress_callback: Optional[Callable[[float], Awaitable[None]]] = None,
     ) -> Tuple[Optional[Path], Optional[Path]]:
-        """Запускает qobuz-dl и парсит прогресс."""
+        if progress_callback:
+            await progress_callback(5.0)
+
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT
+            stderr=asyncio.subprocess.STDOUT,
         )
 
-        last_percent = -1.0
-        buffer = ""
-        
+        all_output = []
         while True:
-            char_bytes = await process.stdout.read(1)
-            if not char_bytes:
+            line_bytes = await process.stdout.readline()
+            if not line_bytes:
                 break
-            
-            char = char_bytes.decode('utf-8', errors='ignore')
-            if char in ['\r', '\n']:
-                line = buffer.strip()
-                match = re.search(r'(\d+(\.\d+)?)%', line)
-                if match and progress_callback:
-                    try:
-                        percent = float(match.group(1))
-                        if percent - last_percent >= 2.0 or percent >= 99.0 or percent < last_percent:
-                            await progress_callback(percent)
-                            last_percent = percent
-                    except ValueError:
-                        pass
-                buffer = ""
-            else:
-                buffer += char
+            line = re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', line_bytes.decode("utf-8", errors="ignore")).strip()
+            if line:
+                all_output.append(line)
+                logger.debug(f"rip: {line}")
 
         await process.wait()
-        
+
         if process.returncode != 0:
-            logger.error(f"❌ Команда qobuz-dl завершилась с ошибкой (код {process.returncode})")
+            output_text = "\n".join(all_output)
+            logger.error(f"❌ rip завершился с ошибкой (код {process.returncode}):\n{output_text}")
+            if "AuthenticationError" in output_text or "Invalid credentials" in output_text or "authentication" in output_text.lower():
+                raise QobuzAuthError("Токен Qobuz истёк или недействителен")
             return None, None
-            
-        logger.info("✅ Команда выполнена. Ищем результат...")
+
+        logger.info("✅ rip завершён. Ищем файл...")
+        if progress_callback:
+            await progress_callback(100.0)
         return self._find_downloaded_files()
 
     def _find_downloaded_files(self) -> Tuple[Optional[Path], Optional[Path]]:
@@ -195,16 +179,26 @@ class QobuzDownloader:
                 try:
                     f.resolve().relative_to(self.download_dir.resolve())
                 except ValueError:
-                    logger.warning(
-                        f"Попытка обхода каталога! Файл '{f}' вне рабочей директории. Пропускаем."
-                    )
+                    logger.warning(f"Попытка обхода каталога! Файл '{f}' вне директории.")
                     continue
-                cover_file = f.parent / "cover.jpg"
-                if not cover_file.exists():
-                    cover_files = list(f.parent.glob("*.jpg")) + list(f.parent.glob("*.png"))
-                    cover_file = cover_files[0] if cover_files else None
-                else:
-                    cover_file = cover_file
-                    
+                cover_files = list(f.parent.glob("*.jpg")) + list(f.parent.glob("*.png"))
+                cover_file = cover_files[0] if cover_files else self._extract_cover(f)
                 return f, cover_file if cover_file and cover_file.exists() else None
         return None, None
+
+    def _extract_cover(self, audio_path: Path) -> Optional[Path]:
+        try:
+            import mutagen
+            audio = mutagen.File(audio_path)
+            if not audio:
+                return None
+            pictures = getattr(audio, "pictures", [])
+            if not pictures:
+                return None
+            cover_path = audio_path.parent / "cover.jpg"
+            cover_path.write_bytes(pictures[0].data)
+            logger.info(f"🖼️ Обложка извлечена из {audio_path.name}")
+            return cover_path
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось извлечь обложку: {e}")
+            return None

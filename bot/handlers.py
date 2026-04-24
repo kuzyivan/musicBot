@@ -1,6 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
-from services.downloader import QobuzDownloader
+from services.downloader import QobuzDownloader, QobuzAuthError
 from services.savify_downloader import SavifyDownloader 
 from services.file_manager import FileManager
 from services.recognizer import AudioRecognizer
@@ -64,8 +64,64 @@ QUALITY_HIERARCHY = {
 
 # --- Команды Start/Help ---
 
+def _token_expired_message() -> str:
+    return (
+        "🔑 *Токен Qobuz истёк* — нужно обновить.\n\n"
+        "*Как получить новый токен:*\n"
+        "1. Открой [play.qobuz.com](https://play.qobuz.com) в браузере и войди в аккаунт\n"
+        "2. Нажми `F12` → вкладка *Network*\n"
+        "3. Обнови страницу (`F5`)\n"
+        "4. В строке поиска запросов введи `user/login`\n"
+        "5. Кликни на найденный запрос → вкладка *Headers*\n"
+        "6. Скопируй значение заголовка `X-User-Auth-Token`\n\n"
+        "Затем отправь боту:\n"
+        "`/settoken ВСТАВЬ_ТОКЕН_СЮДА`"
+    )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎵 Привет! Я бот версии 2.0 и могу скачивать треки с Qobuz и Spotify. 🚀")
+
+
+async def set_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != Config.ADMIN_USER_ID:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    token = " ".join(context.args).strip() if context.args else ""
+    if not token:
+        await update.message.reply_text("Использование: /settoken <токен>")
+        return
+
+    # Обновляем .env
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    lines = env_path.read_text().splitlines()
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith("QOBUZ_AUTH_TOKEN="):
+            lines[i] = f"QOBUZ_AUTH_TOKEN={token}"
+            updated = True
+            break
+    if not updated:
+        lines.append(f"QOBUZ_AUTH_TOKEN={token}")
+    env_path.write_text("\n".join(lines) + "\n")
+
+    # Обновляем конфиг streamrip
+    streamrip_cfg = Path("/root/.config/streamrip/config.toml")
+    if streamrip_cfg.exists():
+        cfg_text = streamrip_cfg.read_text()
+        cfg_text = re.sub(
+            r'(password_or_token\s*=\s*)"[^"]*"',
+            f'\\1"{token}"',
+            cfg_text,
+        )
+        streamrip_cfg.write_text(cfg_text)
+
+    # Обновляем в памяти без перезапуска
+    Config.QOBUZ_AUTH_TOKEN = token
+
+    await update.message.reply_text("✅ Токен Qobuz обновлён.")
+    logger.info(f"🔑 Токен Qobuz обновлён пользователем {update.effective_user.id}")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -152,7 +208,7 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
             base_text = f"💿 Qobuz: Качество {quality_name}\n"
             if track_index: base_text += f"🎵 Трек №{track_index}\n"
             await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=f"{base_text}⏳ Подготовка...")
-            
+
             async def progress_callback(percent):
                 progress_bar = file_manager.format_progress_bar(percent)
                 try:
@@ -162,8 +218,10 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
             audio_file, cover_file = await downloader.download_track(url, quality_id, progress_callback=progress_callback, track_index=track_index)
             if audio_file:
                 await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url, "Qobuz")
-                return 
+                return
         await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="❌ Qobuz: Не удалось скачать файл.")
+    except QobuzAuthError:
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text=_token_expired_message())
     except Exception as e:
         logger.exception(f"❌ Qobuz: Ошибка: {e}")
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Qobuz: Ошибка: {e}")
@@ -322,6 +380,8 @@ async def handle_audio_recognition(update: Update, context: ContextTypes.DEFAULT
             await process_and_send_audio(update, context, sent_message, audio_file, cover_file, "https://qobuz.com", "Qobuz")
         else:
             await sent_message.edit_text("❌ Не найдено на Qobuz.")
+    except QobuzAuthError:
+        await sent_message.edit_text(_token_expired_message())
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
         await sent_message.edit_text("❌ Ошибка.")

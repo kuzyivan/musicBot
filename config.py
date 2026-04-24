@@ -20,6 +20,12 @@ class Config:
 
     QOBUZ_PASSWORD = os.getenv("QOBUZ_PASSWORD")
 
+    QOBUZ_APP_ID = os.getenv("QOBUZ_APP_ID", "798273057")
+
+    QOBUZ_AUTH_TOKEN = os.getenv("QOBUZ_AUTH_TOKEN", "")
+
+    ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
+
     
 
     # Переменная для AudD.io
