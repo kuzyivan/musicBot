@@ -148,6 +148,48 @@ class SpotifyDownloader:
             logger.error(f"❌ Spotify: не удалось получить альбом: {e}")
             return None
 
+    def get_playlist_info(self, url: str) -> Optional[dict]:
+        """Состав плейлиста Spotify — для инлайн-клавиатуры выбора."""
+        parsed = parse_spotify_url(url)
+        if not parsed or parsed["kind"] != "playlist":
+            return None
+
+        try:
+            client = self._client()
+            playlist = client.playlist(parsed["id"])
+            if not playlist:
+                return None
+
+            page = client.playlist_items(parsed["id"], limit=100)
+            items = []
+            while page:
+                items.extend(page.get("items") or [])
+                page = client.next(page) if page.get("next") else None
+
+            tracks = []
+            for item in items:
+                track = (item or {}).get("item") or (item or {}).get("track")
+                # null — трек недоступен в регионе; эпизоды подкастов не качаем
+                if not track or track.get("type") == "episode":
+                    continue
+                tracks.append(
+                    {"index": len(tracks) + 1, "title": track["name"], "id": track["id"]}
+                )
+
+            if not tracks:
+                return None
+
+            return {
+                "title": playlist["name"],
+                "artist": (playlist.get("owner") or {}).get("display_name", ""),
+                "tracks": tracks[:50],
+            }
+        except Exception as e:
+            # Редакционные и алгоритмические плейлисты Spotify (например,
+            # «Today's Top Hits») отдают 404: к ним нет API-доступа
+            logger.error(f"❌ Spotify: не удалось получить плейлист: {e}")
+            return None
+
     # --- загрузка ---
 
     async def download_track_by_id(self, track_id: str) -> Tuple[Optional[Path], Optional[Path]]:
@@ -200,6 +242,18 @@ class SpotifyDownloader:
             index = track_index or 1
             if not 1 <= index <= len(info["tracks"]):
                 raise SpotifyError(f"❌ Spotify: в альбоме нет трека №{index}.")
+            track_id = info["tracks"][index - 1]["id"]
+
+        elif parsed["kind"] == "playlist":
+            info = self.get_playlist_info(url)
+            if not info:
+                raise SpotifyError(
+                    "❌ Spotify: не удалось получить состав плейлиста.\n"
+                    "Редакционные и алгоритмические плейлисты Spotify закрыты для API."
+                )
+            index = track_index or 1
+            if not 1 <= index <= len(info["tracks"]):
+                raise SpotifyError(f"❌ Spotify: в плейлисте нет трека №{index}.")
             track_id = info["tracks"][index - 1]["id"]
 
         else:

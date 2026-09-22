@@ -286,12 +286,16 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parsed = parse_spotify_url(url)
         if parsed and parsed["kind"] == "album":
             await _show_spotify_album_tracks(update, context, url)
+        elif parsed and parsed["kind"] == "playlist":
+            await _show_spotify_playlist_tracks(update, context, url)
         else:
             await _download_spotify(update, context, url)
     elif source == "apple":
         parsed = parse_apple_url(url, storefront=AppleMusicDownloader().account_storefront())
         if parsed and parsed["kind"] == "album":
             await _show_apple_album_tracks(update, context, url)
+        elif parsed and parsed["type"] == "playlist":
+            await _show_apple_playlist_tracks(update, context, url)
         else:
             await _download_apple_music(update, context, url)
     else:
@@ -384,6 +388,30 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             await query.edit_message_text(f"⏳ Скачиваю трек №{action}...")
             await _download_spotify(update, context, url, track_index=int(action))
+        return
+
+    if data.startswith("spl:") or data.startswith("apl:"):
+        is_spotify = data.startswith("spl:")
+        prefix = "spl" if is_spotify else "apl"
+        url = context.user_data.get(
+            "last_spotify_playlist_url" if is_spotify else "last_apple_playlist_url"
+        )
+        if not url:
+            await query.edit_message_text("❌ Ошибка: ссылка потеряна. Отправьте её заново.")
+            return
+        action = data.split(":", 1)[1]
+        if action == "all":
+            await query.edit_message_text("⏳ Скачиваю весь плейлист...")
+            if is_spotify:
+                await _download_spotify_playlist(update, context, url)
+            else:
+                await _download_apple_playlist(update, context, url)
+        else:
+            await query.edit_message_text(f"⏳ Скачиваю трек №{action}...")
+            if is_spotify:
+                await _download_spotify(update, context, url, track_index=int(action))
+            else:
+                await _download_apple_music(update, context, url, track_index=int(action))
         return
 
     if data.startswith("adl:"):
@@ -717,6 +745,152 @@ async def _download_spotify_album(update: Update, context: ContextTypes.DEFAULT_
         await context.bot.send_message(chat_id=chat_id, text="❌ Spotify: не удалось скачать ни одного трека.")
     else:
         logger.info(f"✅ Spotify: из альбома отправлено треков — {sent_count} из {len(tracks)}")
+
+
+async def _render_track_list(update, context, sent_message, info, url, user_data_key, prefix):
+    """Рисует инлайн-клавиатуру состава плейлиста."""
+    text = (
+        f"*{_md_escape(info['title'])}*\n"
+        f"{_md_escape(info['artist'])}\n\n"
+        f"{len(info['tracks'])} треков. Выберите:"
+    )
+
+    keyboard = []
+    current_row = []
+    for track in info["tracks"]:
+        button = InlineKeyboardButton(
+            f"{track['index']}. {track['title']}", callback_data=f"{prefix}:{track['index']}"
+        )
+        current_row.append(button)
+        if len(current_row) == 2:
+            keyboard.append(current_row)
+            current_row = []
+    if current_row:
+        keyboard.append(current_row)
+
+    keyboard.append([InlineKeyboardButton("📥 Скачать весь плейлист", callback_data=f"{prefix}:all")])
+    context.user_data[user_data_key] = url
+    await sent_message.edit_text(
+        text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+    )
+
+
+async def _download_track_list(update, context, url, title, tracks, fetch_track, label):
+    """
+    Скачивает и отправляет все треки списка по очереди.
+
+    fetch_track — корутина, принимающая трек и возвращающая (аудио, обложка,
+    источник). Одно сервисное сообщение переиспользуется под прогресс: иначе
+    на плейлист из полусотни треков в чат сыпались бы десятки служебных строк.
+    """
+    target_update = update.callback_query if update.callback_query else update
+    chat_id = target_update.message.chat_id
+    sent_message = await context.bot.send_message(chat_id=chat_id, text="⏳ Готовлю список...")
+
+    sent_count = 0
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
+    try:
+        for track in tracks:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_message.message_id,
+                text=(
+                    f"⏳ {_md_escape(title)}\n"
+                    f"Трек {track['index']} из {len(tracks)}: {_md_escape(track['title'])}"
+                ),
+                parse_mode="Markdown",
+            )
+
+            try:
+                audio_file, cover_file, track_source = await fetch_track(track)
+            except Exception as e:
+                # Один недоступный трек не должен ронять весь плейлист
+                logger.warning(f"⚠️ {label}: трек «{track['title']}» не скачался: {e}")
+                continue
+
+            if not audio_file:
+                logger.warning(f"⚠️ {label}: трек «{track['title']}» не найден, пропускаю")
+                continue
+
+            await process_and_send_audio(
+                update, context, sent_message, audio_file, cover_file, url,
+                track_source or label, keep_status_message=True,
+            )
+            sent_count += 1
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
+        except Exception:
+            pass
+
+    if sent_count == 0:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ {label}: не удалось скачать ни одного трека.")
+    else:
+        logger.info(f"✅ {label}: отправлено треков — {sent_count} из {len(tracks)}")
+
+
+async def _show_spotify_playlist_tracks(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    sent_message = await update.message.reply_text("⏳ Spotify: получаю состав плейлиста...")
+    info = SpotifyDownloader().get_playlist_info(url)
+    if not info:
+        await sent_message.edit_text(
+            "❌ Spotify: не удалось получить состав плейлиста.\n\n"
+            "Редакционные и алгоритмические плейлисты Spotify (например, «Today's Top Hits») "
+            "закрыты для API — их состав недоступен никому, кроме самого Spotify."
+        )
+        return
+    await _render_track_list(update, context, sent_message, info, url,
+                             "last_spotify_playlist_url", "spl")
+
+
+async def _show_apple_playlist_tracks(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    sent_message = await update.message.reply_text("⏳ Apple Music: получаю состав плейлиста...")
+    info = await AppleMusicDownloader().get_playlist_info(url)
+    if not info:
+        await sent_message.edit_text(
+            "❌ Apple Music: не удалось получить состав плейлиста.\n"
+            "Проверьте, что cookies аккаунта действительны."
+        )
+        return
+    await _render_track_list(update, context, sent_message, info, url,
+                             "last_apple_playlist_url", "apl")
+
+
+async def _download_spotify_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    downloader = SpotifyDownloader()
+    info = downloader.get_playlist_info(url)
+    if not info:
+        await context.bot.send_message(
+            chat_id=(update.callback_query or update).message.chat_id,
+            text="❌ Spotify: состав плейлиста недоступен.",
+        )
+        return
+
+    async def fetch(track):
+        audio_file, cover_file = await downloader.download_track_by_id(track["id"])
+        return audio_file, cover_file, downloader.last_source
+
+    await _download_track_list(update, context, url, info["title"], info["tracks"], fetch, "Spotify")
+
+
+async def _download_apple_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    downloader = AppleMusicDownloader()
+    info = await downloader.get_playlist_info(url)
+    if not info:
+        await context.bot.send_message(
+            chat_id=(update.callback_query or update).message.chat_id,
+            text="❌ Apple Music: состав плейлиста недоступен.",
+        )
+        return
+
+    async def fetch(track):
+        audio_file, cover_file = await downloader.download_track(track["url"])
+        return audio_file, cover_file, "Apple Music"
+
+    await _download_track_list(update, context, url, info["title"], info["tracks"], fetch, "Apple Music")
 
 
 async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, sent_message, initial_audio_file: Path, initial_cover_file: Optional[Path], url_for_caption: str, source: str, keep_status_message: bool = False):

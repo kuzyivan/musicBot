@@ -3,6 +3,7 @@ from typing import Optional, Tuple, Callable, Awaitable, List
 from config import Config
 import logging
 import asyncio
+import json
 import re
 import shutil
 import mutagen
@@ -10,6 +11,11 @@ import mutagen
 logger = logging.getLogger(__name__)
 
 GAMDL_TIMEOUT = 600  # сек
+PROBE_TIMEOUT = 120  # сек — запрос состава плейлиста
+
+# Маркер строки с результатом от apple_playlist_probe.py: отладочные логи
+# gamdl могут попасть в тот же поток, поэтому ищем именно его
+PLAYLIST_RESULT_PREFIX = "RESULT_JSON:"
 
 # Типы ссылок Apple Music. gamdl умеет artist|album|playlist|song|music-video|post,
 # но бот отправляет один файл, поэтому осмысленны только треки.
@@ -255,6 +261,73 @@ class AppleMusicDownloader:
             "tracks": tracks[:50],
         }
 
+    async def get_playlist_info(self, url: str) -> Optional[dict]:
+        """
+        Состав плейлиста Apple Music — для инлайн-клавиатуры выбора.
+
+        Публичный iTunes API плейлисты не отдаёт вовсе (отвечает 400),
+        поэтому состав берём авторизованным API gamdl. Он живёт в отдельном
+        окружении, так что запрашиваем его отдельным процессом, а не импортом:
+        зависимости gamdl несовместимы с окружением бота.
+        """
+        parsed = parse_apple_url(url, storefront=self.account_storefront())
+        if not parsed or parsed["type"] != "playlist":
+            return None
+
+        probe = Path(__file__).resolve().parent / "apple_playlist_probe.py"
+        python_path = self.gamdl_path.parent / "python"
+        if not probe.exists() or not python_path.exists():
+            logger.error("❌ Apple Music: нет вспомогательного скрипта или интерпретатора gamdl-venv")
+            return None
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                str(python_path), str(probe), str(self.cookies_path), parsed["id"],
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=PROBE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ Apple Music: запрос состава плейлиста превысил {PROBE_TIMEOUT}s")
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            return None
+        except Exception as e:
+            logger.warning(f"⚠️ Apple Music: ошибка получения плейлиста: {e}")
+            return None
+
+        payload = None
+        for line in stdout.decode("utf-8", errors="ignore").splitlines():
+            if line.startswith(PLAYLIST_RESULT_PREFIX):
+                try:
+                    payload = json.loads(line[len(PLAYLIST_RESULT_PREFIX):])
+                except ValueError as e:
+                    logger.warning(f"⚠️ Apple Music: не разобрался JSON плейлиста: {e}")
+                break
+
+        if not payload or not payload.get("tracks"):
+            logger.warning("⚠️ Apple Music: состав плейлиста пуст или не получен")
+            return None
+
+        storefront = payload.get("storefront") or DEFAULT_STOREFRONT
+        tracks = [
+            {
+                "index": index,
+                "title": track.get("title", ""),
+                "url": f"https://music.apple.com/{storefront}/song/{track['id']}",
+            }
+            for index, track in enumerate(payload["tracks"][:50], 1)
+        ]
+
+        return {
+            "title": payload.get("title", ""),
+            "artist": payload.get("artist", ""),
+            "tracks": tracks,
+        }
+
     async def search_and_download_lucky(
         self,
         artist: str,
@@ -334,6 +407,19 @@ class AppleMusicDownloader:
             if not 1 <= index <= len(album_info["tracks"]):
                 raise AppleMusicError(f"❌ Apple Music: в альбоме нет трека №{index}.")
             url = album_info["tracks"][index - 1]["url"]
+
+        elif parsed["type"] == "playlist":
+            # kind у плейлиста — 'unsupported', поэтому проверяем по типу
+            playlist_info = await self.get_playlist_info(url)
+            if not playlist_info or not playlist_info["tracks"]:
+                raise AppleMusicError(
+                    "❌ Apple Music: не удалось получить состав плейлиста.\n"
+                    "Проверьте, что cookies аккаунта действительны."
+                )
+            index = track_index or 1
+            if not 1 <= index <= len(playlist_info["tracks"]):
+                raise AppleMusicError(f"❌ Apple Music: в плейлисте нет трека №{index}.")
+            url = playlist_info["tracks"][index - 1]["url"]
 
         else:
             raise AppleMusicError(
