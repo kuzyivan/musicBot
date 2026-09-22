@@ -3,7 +3,7 @@ from telegram.constants import ChatAction
 from telegram.ext import ContextTypes, CallbackQueryHandler
 from services.downloader import QobuzDownloader, QobuzAuthError
 from services import whitelist
-from services.savify_downloader import SavifyDownloader
+from services.spotify_downloader import SpotifyDownloader, SpotifyError
 from services.apple_music_downloader import AppleMusicDownloader, AppleMusicError, parse_apple_url
 from services.sources import detect_source
 from services.file_manager import FileManager
@@ -458,18 +458,52 @@ async def _download_apple_music(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
-    downloader = SavifyDownloader()
-    sent_message = await update.message.reply_text("⏳ Начинаю поиск на Spotify...")
+    """
+    Ссылка Spotify используется как источник метаданных: сам Spotify аудио
+    не отдаёт. Файл берётся с Qobuz (Hi-Res), а если трека там нет — с YouTube.
+    """
+    downloader = SpotifyDownloader()
+    chat_id = update.effective_chat.id
+    sent_message = await update.message.reply_text("⏳ Spotify: получаю данные трека...")
+
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
     try:
-        await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=sent_message.message_id, text="💿 Spotify: Ищу и скачиваю...")
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=sent_message.message_id,
+            text="🎧 Spotify: ищу на Qobuz (Hi-Res), при отсутствии — на YouTube...",
+        )
+
         audio_file, cover_file = await downloader.download_track(url)
+
         if audio_file:
-            await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url, "Spotify")
+            # В подписи называется реальный источник: файл пришёл не со Spotify
+            source = downloader.last_source or "YouTube"
+            await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url, source)
         else:
-            await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=sent_message.message_id, text="❌ Spotify: Не удалось скачать.")
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_message.message_id,
+                text="❌ Spotify: трек не найден ни на Qobuz, ни на YouTube.",
+            )
+    except SpotifyError as e:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=sent_message.message_id,
+            text=e.user_message,
+            parse_mode='Markdown',
+        )
     except Exception as e:
         logger.exception(f"❌ Spotify: Ошибка: {e}")
-        await update.message.reply_text(f"❌ Spotify: Ошибка: {e}")
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=sent_message.message_id,
+            text=f"❌ Spotify: Ошибка: {e}",
+        )
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
 
 
 async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, sent_message, initial_audio_file: Path, initial_cover_file: Optional[Path], url_for_caption: str, source: str):

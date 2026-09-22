@@ -73,9 +73,11 @@ jobs:
             pip install --upgrade pip
             pip install -r requirements.txt
 
-            echo "🔧 Установка YouTube загрузчиков..."
+            # yt-dlp обновляем на каждом деплое: YouTube регулярно ломает
+            # извлечение, и свежая версия — единственное лекарство.
+            # youtube-dl больше не нужен: он требовался только savify.
+            echo "🔧 Обновление yt-dlp..."
             pip uninstall -y youtube-dl yt-dlp yt-dlp-compat-youtube-dl
-            pip install -U youtube-dl
             pip install -U yt-dlp
 
             # gamdl держим в отдельном окружении: он требует httpx>=0.28.1,

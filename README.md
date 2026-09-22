@@ -135,7 +135,7 @@ sudo systemctl enable musicbot
 | Язык | Python 3.11 |
 | Telegram | python-telegram-bot |
 | Загрузчик Qobuz | streamrip |
-| Загрузчик Spotify | savify |
+| Загрузчик Spotify | spotipy (метаданные) + Qobuz или yt-dlp (файл) |
 | Загрузчик Apple Music | gamdl 3.8.5 (отдельное окружение `gamdl-venv`) |
 | Распознавание | AudD.io API |
 | Обработка аудио | FFmpeg |
@@ -154,7 +154,7 @@ musicBot/
 ├── services/
 │   ├── sources.py           # Распознавание источника по ссылке
 │   ├── downloader.py        # Загрузка с Qobuz через streamrip
-│   ├── savify_downloader.py # Загрузка со Spotify
+│   ├── spotify_downloader.py # Загрузка по ссылке Spotify
 │   ├── apple_music_downloader.py # Загрузка с Apple Music через gamdl
 │   ├── recognizer.py        # Распознавание аудио
 │   ├── file_manager.py      # Работа с файлами
@@ -168,4 +168,5 @@ musicBot/
 - Для скачивания с Qobuz необходима **платная подписка** (Studio или Sublime)
 - Токен Qobuz истекает периодически — бот уведомит когда придёт время обновить
 - Для Apple Music нужна **активная подписка**; качество — AAC 256 kbps, каталог ограничен регионом подписки
+- Spotify аудио не отдаёт, поэтому ссылка используется как источник метаданных: трек ищется на **Qobuz** (Hi-Res), а если его там нет — берётся с **YouTube** через yt-dlp. В подписи всегда указывается реальный источник, а не Spotify
 - Файлы `.env`, `whitelist.json`, `cookies.txt` и скачанная музыка в репозиторий не попадают (`.gitignore`)

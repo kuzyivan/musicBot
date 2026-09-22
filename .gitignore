@@ -15,6 +15,7 @@ whitelist.json
 # поэтому скачанные файлы попадали в git как untracked.
 Qobuz/Downloads/
 AppleMusic/Downloads/
+Spotify/Downloads/
 Qobuz_Downloads/
 
 # --- Окружения ---
@@ -25,6 +26,9 @@ gamdl-venv/
 # --- Прочее ---
 __pycache__/
 *.pyc
+# кэш токена spotipy: пишется в каталог запуска
+.cache
+*.cache
 *.bak
 *.bak-*
 logs/

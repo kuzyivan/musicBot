@@ -66,6 +66,11 @@ class Config:
 
     APPLE_MUSIC_DOWNLOAD_DIR = BASE_DIR / "AppleMusic" / "Downloads"
 
+    # --- Spotify (метаданные через spotipy, загрузка через Qobuz или yt-dlp) ---
+
+    SPOTIFY_DOWNLOAD_DIR = BASE_DIR / "Spotify" / "Downloads"
+    YT_DLP_PATH = BASE_DIR / "venv" / "bin" / "yt-dlp"
+
     DOWNLOAD_DIR = BASE_DIR / "Qobuz/Downloads"
 
     MAX_FILE_SIZE_MB = 2000

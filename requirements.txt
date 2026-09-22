@@ -3,7 +3,13 @@ python-telegram-bot==20.7
 qobuz-dl==0.9.9.10
 pydub
 python-dotenv
-savify
+
+# --- Spotify ---
+# savify убран: он не получал Logger (падал до начала скачивания) и работал
+# через youtube_dl 2021 года, который YouTube давно не понимает. Метаданные
+# теперь берёт spotipy, загрузку — Qobuz или yt-dlp (ставится отдельно ниже).
+spotipy
+yt-dlp
 
 # --- Apple Music (не ставить сюда!) ---
 # Для Apple Music используется gamdl, он живёт в ОТДЕЛЬНОМ окружении gamdl-venv:
