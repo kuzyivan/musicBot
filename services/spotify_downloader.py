@@ -127,41 +127,47 @@ class SpotifyDownloader:
         self._clear_temp_dir()
 
         # Источники по убыванию качества: Hi-Res → AAC 256 → YouTube-рип
-        audio_file = await self._download_from_qobuz(meta)
+        audio_file, cover_file = await self._download_from_qobuz(meta)
         if not audio_file:
             logger.info("⚠️ Spotify: на Qobuz не найдено, пробую Apple Music")
-            audio_file = await self._download_from_apple(meta)
+            audio_file, cover_file = await self._download_from_apple(meta)
         if not audio_file:
             logger.info("⚠️ Spotify: на Apple Music не найдено, беру с YouTube")
-            audio_file = await self._download_from_youtube(meta)
+            audio_file, cover_file = await self._download_from_youtube(meta)
 
         if not audio_file:
             return None, None
 
-        cover_file = await self._save_cover(meta.get("cover_url"), audio_file)
+        # Обложка от источника качественнее арта Spotify (Apple отдаёт 1200px
+        # против 640px), поэтому берём её, а к Spotify обращаемся только если
+        # источник своей не дал — как YouTube.
+        if not cover_file or not cover_file.exists():
+            cover_file = await self._save_cover(meta.get("cover_url"), audio_file)
+
         return audio_file, cover_file
 
-    async def _download_from_qobuz(self, meta: dict) -> Optional[Path]:
+    async def _download_from_qobuz(self, meta: dict) -> Tuple[Optional[Path], Optional[Path]]:
         """Hi-Res с Qobuz по метаданным Spotify."""
         from services.downloader import QobuzDownloader, QobuzAuthError
 
         try:
             downloader = QobuzDownloader()
-            audio_file, _ = await downloader.search_and_download_lucky(
+            audio_file, cover_file = await downloader.search_and_download_lucky(
                 meta["artist"], meta["title"]
             )
             if audio_file:
                 logger.info(f"✅ Spotify→Qobuz: получен {audio_file.name}")
                 self.last_source = "Qobuz"
-            return audio_file
+                return audio_file, cover_file
+            return None, None
         except QobuzAuthError:
-            logger.warning("⚠️ Spotify: токен Qobuz недействителен, откат на YouTube")
-            return None
+            logger.warning("⚠️ Spotify: токен Qobuz недействителен, откат на Apple")
+            return None, None
         except Exception as e:
-            logger.warning(f"⚠️ Spotify: Qobuz недоступен ({e}), откат на YouTube")
-            return None
+            logger.warning(f"⚠️ Spotify: Qobuz недоступен ({e}), откат на Apple")
+            return None, None
 
-    async def _download_from_apple(self, meta: dict) -> Optional[Path]:
+    async def _download_from_apple(self, meta: dict) -> Tuple[Optional[Path], Optional[Path]]:
         """AAC 256 kbps из Apple Music по метаданным Spotify."""
         from services.apple_music_downloader import AppleMusicDownloader, AppleMusicError
 
@@ -169,30 +175,31 @@ class SpotifyDownloader:
             downloader = AppleMusicDownloader()
             if not downloader.is_configured():
                 logger.info("ℹ️ Spotify: Apple Music пропущен — не настроены cookies")
-                return None
+                return None, None
 
-            audio_file, _ = await downloader.search_and_download_lucky(
+            audio_file, cover_file = await downloader.search_and_download_lucky(
                 meta["artist"], meta["title"]
             )
             if audio_file:
                 logger.info(f"✅ Spotify→Apple Music: получен {audio_file.name}")
                 self.last_source = "Apple Music"
-            return audio_file
+                return audio_file, cover_file
+            return None, None
         except AppleMusicError as e:
             # Нет подписки, протухшие cookies, трек вне региона — не повод
-            # падать, просто идём на YouTube
+            # падать, просто идём дальше по цепочке
             first_line = e.user_message.splitlines()[0]
             logger.info(f"ℹ️ Spotify: Apple Music недоступен — {first_line}")
-            return None
+            return None, None
         except Exception as e:
             logger.warning(f"⚠️ Spotify: Apple Music ошибка ({e}), откат на YouTube")
-            return None
+            return None, None
 
-    async def _download_from_youtube(self, meta: dict) -> Optional[Path]:
+    async def _download_from_youtube(self, meta: dict) -> Tuple[Optional[Path], Optional[Path]]:
         """Откат: поиск на YouTube и извлечение аудио в MP3."""
         if not self.ydl_path.exists():
             logger.error(f"❌ Spotify: yt-dlp не найден по пути {self.ydl_path}")
-            return None
+            return None, None
 
         query = f"ytsearch1:{meta['artist']} - {meta['title']} audio"
         command = [
@@ -218,10 +225,10 @@ class SpotifyDownloader:
                 process.kill()
             except ProcessLookupError:
                 pass
-            return None
+            return None, None
         except Exception as e:
             logger.error(f"❌ Spotify: ошибка запуска yt-dlp: {e}")
-            return None
+            return None, None
 
         output = stdout.decode("utf-8", errors="ignore")
         if process.returncode != 0:
@@ -232,7 +239,8 @@ class SpotifyDownloader:
             self._write_tags(audio_file, meta)
             logger.info(f"✅ Spotify→YouTube: получен {audio_file.name}")
             self.last_source = "YouTube"
-        return audio_file
+        # Обложки у YouTube нет — её подставит _save_cover из арта Spotify
+        return audio_file, None
 
     # --- вспомогательное ---
 
