@@ -104,26 +104,56 @@ class SpotifyDownloader:
             "cover_url": images[0]["url"] if images else None,
         }
 
+    # --- альбомы ---
+
+    def get_album_info(self, url: str) -> Optional[dict]:
+        """Список треков альбома — для инлайн-клавиатуры выбора."""
+        parsed = parse_spotify_url(url)
+        if not parsed or parsed["kind"] != "album":
+            return None
+
+        try:
+            client = self._client()
+            album = client.album(parsed["id"])
+            if not album:
+                return None
+
+            page = album.get("tracks") or {}
+            items = list(page.get("items") or [])
+            # Spotify отдаёт по 50 треков на страницу
+            while page.get("next"):
+                page = client.next(page)
+                items.extend(page.get("items") or [])
+
+            tracks = []
+            for item in items:
+                if not item:  # трек недоступен в регионе аккаунта
+                    continue
+                tracks.append(
+                    {"index": len(tracks) + 1, "title": item["name"], "id": item["id"]}
+                )
+
+            if not tracks:
+                return None
+
+            images = album.get("images") or []
+            return {
+                "title": album["name"],
+                "artist": ", ".join(a["name"] for a in album.get("artists", [])),
+                # ограничение как у Qobuz: клавиатура не должна быть бесконечной
+                "tracks": tracks[:50],
+                "cover_url": images[0]["url"] if images else None,
+            }
+        except Exception as e:
+            logger.error(f"❌ Spotify: не удалось получить альбом: {e}")
+            return None
+
     # --- загрузка ---
 
-    async def download_track(self, url: str) -> Tuple[Optional[Path], Optional[Path]]:
-        """
-        Скачивает трек по ссылке Spotify.
-        Возвращает (аудио, обложка) либо (None, None).
-        """
-        parsed = parse_spotify_url(url)
-        if not parsed:
-            raise SpotifyError("❌ Spotify: не удалось разобрать ссылку.")
-        if parsed["kind"] != "track":
-            raise SpotifyError(
-                f"🍏 Spotify: ссылки типа «{parsed['kind']}» пока не поддерживаются.\n\n"
-                "Пришлите ссылку на конкретный трек — в приложении это «Поделиться» → "
-                "«Копировать ссылку» на самом треке."
-            )
-
-        meta = self._get_track_metadata(parsed["id"])
+    async def download_track_by_id(self, track_id: str) -> Tuple[Optional[Path], Optional[Path]]:
+        """Скачивает трек по его Spotify ID."""
+        meta = self._get_track_metadata(track_id)
         logger.info(f"🎧 Spotify: {meta['artist']} — {meta['title']}")
-
         self._clear_temp_dir()
 
         # Источники по убыванию качества: Hi-Res → AAC 256 → YouTube-рип
@@ -145,6 +175,40 @@ class SpotifyDownloader:
             cover_file = await self._save_cover(meta.get("cover_url"), audio_file)
 
         return audio_file, cover_file
+
+    async def download_track(
+        self, url: str, track_index: Optional[int] = None
+    ) -> Tuple[Optional[Path], Optional[Path]]:
+        """
+        Скачивает трек по ссылке Spotify.
+
+        Ссылка на альбом тоже принимается: с track_index (нумерация с 1) берётся
+        конкретный трек, без него — первый (весь альбом качает вызывающая сторона,
+        чтобы отправлять файлы по мере готовности).
+        """
+        parsed = parse_spotify_url(url)
+        if not parsed:
+            raise SpotifyError("❌ Spotify: не удалось разобрать ссылку.")
+
+        if parsed["kind"] == "track":
+            track_id = parsed["id"]
+
+        elif parsed["kind"] == "album":
+            info = self.get_album_info(url)
+            if not info:
+                raise SpotifyError("❌ Spotify: не удалось получить список треков альбома.")
+            index = track_index or 1
+            if not 1 <= index <= len(info["tracks"]):
+                raise SpotifyError(f"❌ Spotify: в альбоме нет трека №{index}.")
+            track_id = info["tracks"][index - 1]["id"]
+
+        else:
+            raise SpotifyError(
+                f"🍏 Spotify: ссылки типа «{parsed['kind']}» не поддерживаются.\n\n"
+                "Пришлите ссылку на трек или альбом."
+            )
+
+        return await self.download_track_by_id(track_id)
 
     async def _download_from_qobuz(self, meta: dict) -> Tuple[Optional[Path], Optional[Path]]:
         """Hi-Res с Qobuz по метаданным Spotify."""

@@ -3,7 +3,7 @@ from telegram.constants import ChatAction
 from telegram.ext import ContextTypes, CallbackQueryHandler
 from services.downloader import QobuzDownloader, QobuzAuthError
 from services import whitelist
-from services.spotify_downloader import SpotifyDownloader, SpotifyError
+from services.spotify_downloader import SpotifyDownloader, SpotifyError, parse_spotify_url
 from services.apple_music_downloader import AppleMusicDownloader, AppleMusicError, parse_apple_url
 from services.sources import detect_source
 from services.file_manager import FileManager
@@ -283,7 +283,11 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await _download_qobuz(update, context, url)
     elif source == "spotify":
-        await _download_spotify(update, context, url)
+        parsed = parse_spotify_url(url)
+        if parsed and parsed["kind"] == "album":
+            await _show_spotify_album_tracks(update, context, url)
+        else:
+            await _download_spotify(update, context, url)
     elif source == "apple":
         await _download_apple_music(update, context, url)
     else:
@@ -320,6 +324,42 @@ async def _show_qobuz_album_tracks(update: Update, context: ContextTypes.DEFAULT
     await sent_message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
 
+async def _show_spotify_album_tracks(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    """Показывает список треков альбома Spotify с кнопками."""
+    downloader = SpotifyDownloader()
+    sent_message = await update.message.reply_text("⏳ Spotify: получаю список треков альбома...")
+
+    album_info = downloader.get_album_info(url)
+    if not album_info or not album_info["tracks"]:
+        await sent_message.edit_text("❌ Spotify: не удалось получить список треков альбома.")
+        return
+
+    text = (
+        f"*{_md_escape(album_info['title'])}*\n"
+        f"{_md_escape(album_info['artist'])}\n\n"
+        "Выберите трек:"
+    )
+
+    keyboard = []
+    current_row = []
+    for track in album_info["tracks"]:
+        button = InlineKeyboardButton(
+            f"{track['index']}. {track['title']}", callback_data=f"sdl:{track['index']}"
+        )
+        current_row.append(button)
+        if len(current_row) == 2:
+            keyboard.append(current_row)
+            current_row = []
+    if current_row:
+        keyboard.append(current_row)
+
+    keyboard.append([InlineKeyboardButton("📥 Скачать весь альбом", callback_data="sdl:all")])
+    context.user_data["last_spotify_album_url"] = url
+    await sent_message.edit_text(
+        text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+    )
+
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -327,6 +367,21 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("⛔ Нет доступа.")
         return
     data = query.data
+
+    if data.startswith("sdl:"):
+        url = context.user_data.get("last_spotify_album_url")
+        if not url:
+            await query.edit_message_text("❌ Ошибка: ссылка потеряна. Отправьте её заново.")
+            return
+        action = data.split(":", 1)[1]
+        if action == "all":
+            await query.edit_message_text("⏳ Скачиваю весь альбом...")
+            await _download_spotify_album(update, context, url)
+        else:
+            await query.edit_message_text(f"⏳ Скачиваю трек №{action}...")
+            await _download_spotify(update, context, url, track_index=int(action))
+        return
+
     if not data.startswith("qdl:"): return
     url = context.user_data.get('last_album_url')
     if not url:
@@ -457,14 +512,16 @@ async def _download_apple_music(update: Update, context: ContextTypes.DEFAULT_TY
         typing_task.cancel()
 
 
-async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, track_index: Optional[int] = None):
     """
     Ссылка Spotify используется как источник метаданных: сам Spotify аудио
-    не отдаёт. Файл берётся с Qobuz (Hi-Res), а если трека там нет — с YouTube.
+    не отдаёт. Файл берётся с Qobuz (Hi-Res), затем с Apple Music, затем с YouTube.
     """
     downloader = SpotifyDownloader()
-    chat_id = update.effective_chat.id
-    sent_message = await update.message.reply_text("⏳ Spotify: получаю данные трека...")
+    # Вызывается и из кнопок, где update.message отсутствует
+    target_update = update.callback_query if update.callback_query else update
+    chat_id = target_update.message.chat_id
+    sent_message = await context.bot.send_message(chat_id=chat_id, text="⏳ Spotify: получаю данные трека...")
 
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
@@ -472,10 +529,10 @@ async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=sent_message.message_id,
-            text="🎧 Spotify: ищу на Qobuz (Hi-Res), при отсутствии — на YouTube...",
+            text="🎧 Spotify: ищу на Qobuz (Hi-Res), затем на Apple Music, затем на YouTube...",
         )
 
-        audio_file, cover_file = await downloader.download_track(url)
+        audio_file, cover_file = await downloader.download_track(url, track_index=track_index)
 
         if audio_file:
             # В подписи называется реальный источник: файл пришёл не со Spotify
@@ -485,7 +542,7 @@ async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=sent_message.message_id,
-                text="❌ Spotify: трек не найден ни на Qobuz, ни на YouTube.",
+                text="❌ Spotify: трек не найден ни на Qobuz, ни на Apple Music, ни на YouTube.",
             )
     except SpotifyError as e:
         await context.bot.edit_message_text(
@@ -506,7 +563,74 @@ async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         typing_task.cancel()
 
 
-async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, sent_message, initial_audio_file: Path, initial_cover_file: Optional[Path], url_for_caption: str, source: str):
+async def _download_spotify_album(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    """
+    Скачивает и отправляет все треки альбома по очереди.
+
+    Одно сервисное сообщение переиспользуется под прогресс: иначе на альбом
+    из десятка треков в чат сыпались бы десятки служебных строк.
+    """
+    downloader = SpotifyDownloader()
+    target_update = update.callback_query if update.callback_query else update
+    chat_id = target_update.message.chat_id
+    sent_message = await context.bot.send_message(chat_id=chat_id, text="⏳ Spotify: получаю список треков...")
+
+    album_info = downloader.get_album_info(url)
+    if not album_info or not album_info["tracks"]:
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=sent_message.message_id,
+            text="❌ Spotify: не удалось получить список треков альбома.",
+        )
+        return
+
+    tracks = album_info["tracks"]
+    sent_count = 0
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
+    try:
+        for track in tracks:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_message.message_id,
+                text=(
+                    f"⏳ {_md_escape(album_info['title'])}\n"
+                    f"Трек {track['index']} из {len(tracks)}: {_md_escape(track['title'])}"
+                ),
+                parse_mode="Markdown",
+            )
+
+            audio_file, cover_file = await downloader.download_track_by_id(track["id"])
+            if not audio_file:
+                logger.warning(f"⚠️ Spotify: трек «{track['title']}» не найден нигде, пропускаю")
+                continue
+
+            await process_and_send_audio(
+                update, context, sent_message, audio_file, cover_file, url,
+                downloader.last_source or "Spotify", keep_status_message=True,
+            )
+            sent_count += 1
+    except SpotifyError as e:
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=sent_message.message_id,
+            text=e.user_message, parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.exception(f"❌ Spotify: Ошибка при скачивании альбома: {e}")
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
+        except Exception:
+            pass
+
+    if sent_count == 0:
+        await context.bot.send_message(chat_id=chat_id, text="❌ Spotify: не удалось скачать ни одного трека.")
+    else:
+        logger.info(f"✅ Spotify: из альбома отправлено треков — {sent_count} из {len(tracks)}")
+
+
+async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, sent_message, initial_audio_file: Path, initial_cover_file: Optional[Path], url_for_caption: str, source: str, keep_status_message: bool = False):
     file_manager = FileManager()
     files_to_delete = {initial_audio_file}
     if initial_cover_file: files_to_delete.add(initial_cover_file)
@@ -586,8 +710,10 @@ async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_T
                 filename=custom_filename
             )
         
-        # Удаляем сервисное сообщение
-        await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
+        # Удаляем сервисное сообщение, если вызывающий не переиспользует его
+        # под прогресс (альбом скачивается в цикле)
+        if not keep_status_message:
+            await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
     finally:
         for f in files_to_delete: file_manager.safe_remove(f)
 
