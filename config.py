@@ -48,9 +48,20 @@ class Config:
 
     
 
-    # --- ИСПРАВЛЕНИЕ ПУТИ ---
+    # --- Apple Music (gamdl) ---
 
-    # Пути теперь относительные к корню проекта, а не абсолютные
+    # cookies.txt в Netscape-формате с cookie media-user-token (.music.apple.com)
+
+    APPLE_MUSIC_COOKIES = Path(os.getenv("APPLE_MUSIC_COOKIES") or BASE_DIR / "cookies.txt")
+
+    # gamdl живёт в отдельном venv: он требует httpx>=0.28, а python-telegram-bot пинит ~=0.25.2
+
+    APPLE_MUSIC_GAMDL = BASE_DIR / "gamdl-venv" / "bin" / "gamdl"
+
+    # Отдельно от DOWNLOAD_DIR: QobuzDownloader чистит свой каталог рекурсивно
+    # и при одновременной загрузке снёс бы файл Apple Music.
+
+    APPLE_MUSIC_DOWNLOAD_DIR = BASE_DIR / "AppleMusic" / "Downloads"
 
     DOWNLOAD_DIR = BASE_DIR / "Qobuz/Downloads"
 

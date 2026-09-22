@@ -5,6 +5,13 @@ pydub
 python-dotenv
 savify
 
+# --- Apple Music (не ставить сюда!) ---
+# Для Apple Music используется gamdl, он живёт в ОТДЕЛЬНОМ окружении gamdl-venv:
+#   python3.11 -m venv gamdl-venv && gamdl-venv/bin/pip install "gamdl==3.8.5"
+# Причина: gamdl требует httpx>=0.28.1 и Pillow>=12, а python-telegram-bot 20.7
+# пинит httpx~=0.25.2 — установка в это окружение сломает самого бота.
+# Версия 3.8.5 закреплена намеренно: в 3.9 сломан кодек aac-web (issue #352).
+
 # --- Вспомогательные библиотеки (pip подберет совместимые версии) ---
 anyio
 beautifulsoup4

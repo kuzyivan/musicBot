@@ -4,6 +4,8 @@ from telegram.ext import ContextTypes, CallbackQueryHandler
 from services.downloader import QobuzDownloader, QobuzAuthError
 from services import whitelist
 from services.savify_downloader import SavifyDownloader
+from services.apple_music_downloader import AppleMusicDownloader, AppleMusicError, parse_apple_url
+from services.sources import detect_source
 from services.file_manager import FileManager
 from services.recognizer import AudioRecognizer
 from config import Config
@@ -60,6 +62,40 @@ def embed_cover_art(audio_path: Path, cover_path: Optional[Path]):
     finally:
         if temp_output_path.exists(): temp_output_path.unlink()
 
+
+def _md_escape(value) -> str:
+    """
+    Экранирует символы, ломающие parse_mode='Markdown'.
+
+    Названия треков и артистов содержат _ * ` [ — без экранирования Telegram
+    отклоняет сообщение целиком с ошибкой разбора разметки, и пользователь
+    не получает вообще ничего.
+    """
+    return re.sub(r"([_*`\[\]])", r"\\\1", str(value))
+
+
+def has_embedded_cover(audio_path: Path) -> bool:
+    """
+    Проверяет, есть ли в файле встроенная обложка.
+    gamdl (Apple Music) и streamrip (Qobuz) вшивают её сами, и повторное
+    встраивание через ffmpeg только раздувает файл и тратит время.
+    """
+    try:
+        audio = mutagen.File(audio_path)
+        if not audio:
+            return False
+        if getattr(audio, "pictures", None):
+            return True
+        tags = audio.tags or {}
+        if "covr" in tags:
+            return True
+        if hasattr(tags, "getall") and tags.getall("APIC"):
+            return True
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось проверить встроенную обложку: {e}")
+    return False
+
+
 def convert_to_mp3(file_path: Path) -> Optional[Path]:
     mp3_path = file_path.with_suffix(".mp3")
     logger.info(f"🎵 Конвертация файла {file_path.name} в MP3...")
@@ -74,6 +110,37 @@ def convert_to_mp3(file_path: Path) -> Optional[Path]:
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ Ошибка конвертации ffmpeg: {e.stderr.decode()}")
         return None
+
+TELEGRAM_PHOTO_LIMIT_BYTES = 10 * 1024 * 1024
+
+def prepare_cover_for_telegram(cover_path: Path) -> Optional[Path]:
+    """
+    Telegram принимает фото до 10 МБ. Если обложка больше — сжимаем через ffmpeg.
+    Возвращает путь к файлу, готовому к отправке (или исходный, если он влезает).
+    """
+    try:
+        if cover_path.stat().st_size <= TELEGRAM_PHOTO_LIMIT_BYTES:
+            return cover_path
+    except OSError:
+        return None
+
+    compressed_path = cover_path.with_suffix(".tg.jpg")
+    for max_width in (3000, 2000, 1200):
+        command = [
+            "ffmpeg", "-y", "-i", str(cover_path),
+            "-vf", f"scale='min({max_width},iw)':-2",
+            "-q:v", "3", str(compressed_path)
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ Не удалось сжать обложку с помощью ffmpeg: {e.stderr.decode()}")
+            break
+        if compressed_path.exists() and compressed_path.stat().st_size <= TELEGRAM_PHOTO_LIMIT_BYTES:
+            return compressed_path
+    if compressed_path.exists():
+        compressed_path.unlink()
+    return None
 
 QUALITY_HIERARCHY = {
     "HI-RES (Max)": 27,
@@ -100,7 +167,7 @@ def _token_expired_message() -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎵 Привет! Я бот версии 2.0 и могу скачивать треки с Qobuz и Spotify. 🚀")
+    await update.message.reply_text("🎵 Привет! Я бот версии 2.0 и могу скачивать треки с Qobuz, Spotify и Apple Music. 🚀")
 
 
 async def set_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,7 +262,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "/start — приветствие\n"
-        "/download <ссылка> — скачать трек (Qobuz или Spotify)\n"
+        "/download <ссылка> — скачать трек (Qobuz, Spotify или Apple Music)\n"
         "Или просто отправь аудио для распознавания."
     )
 
@@ -208,15 +275,19 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.args[0] if context.args else getattr(update.message, 'text', '').strip()
     if not url: return
 
-    if re.search(r"qobuz\.com/", url):
+    source = detect_source(url)
+
+    if source == "qobuz":
         if "/album/" in url:
             await _show_qobuz_album_tracks(update, context, url)
         else:
             await _download_qobuz(update, context, url)
-    elif re.search(r"spotify\.com/", url):
+    elif source == "spotify":
         await _download_spotify(update, context, url)
+    elif source == "apple":
+        await _download_apple_music(update, context, url)
     else:
-        await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на Qobuz или Spotify.")
+        await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на Qobuz, Spotify или Apple Music.")
 
 
 async def _show_qobuz_album_tracks(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
@@ -301,6 +372,91 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
         typing_task.cancel()
 
 
+def _apple_link_hint(media_type: str) -> str:
+    """Объясняет, почему ссылка такого типа не подходит."""
+    common = (
+        "В приложении: «Поделиться» → «Скопировать ссылку» на самом треке.\n"
+        "Ссылка выглядит так:\n"
+        "`https://music.apple.com/ru/album/название/1559885420?i=1559885421`"
+    )
+    if media_type == "album":
+        return "🍎 Apple Music: ссылка ведёт на весь альбом, а бот отправляет один файл.\n\n" + common
+    if media_type == "library":
+        return (
+            "🍎 Apple Music: ссылки из «Медиатеки» пока не поддерживаются.\n\n"
+            "Откройте трек в каталоге Apple Music и пришлите ссылку оттуда."
+        )
+    return f"🍎 Apple Music: ссылки типа «{media_type}» не поддерживаются.\n\n" + common
+
+
+async def _download_apple_music(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    """
+    Скачивание трека из Apple Music через gamdl.
+
+    Ссылка сначала приводится к каноничному виду: gamdl принимает строго
+    https, только домены music/classical.music.apple.com и обязательно с кодом
+    страны. Поэтому ссылки вида geo.music.apple.com, itunes.apple.com, http://
+    или без /ru/ иначе падали бы с ошибкой разбора URL.
+    """
+    downloader = AppleMusicDownloader()
+    parsed = parse_apple_url(url, storefront=downloader.account_storefront())
+
+    if parsed is None:
+        logger.warning(f"⚠️ Apple Music: не удалось разобрать ссылку {url}")
+        await update.message.reply_text(
+            "❌ Apple Music: не удалось разобрать ссылку. Пришлите ссылку на трек из каталога."
+        )
+        return
+
+    if parsed["kind"] != "track":
+        logger.info(f"ℹ️ Apple Music: ссылка типа '{parsed['type']}' не поддерживается")
+        await update.message.reply_text(_apple_link_hint(parsed["type"]))
+        return
+
+    if parsed["url"] != url:
+        logger.info(f"🔗 Apple Music: ссылка приведена к виду {parsed['url']}")
+
+    sent_message = await update.message.reply_text("⏳ Apple Music: готовлю скачивание...")
+    chat_id = update.effective_chat.id
+
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=sent_message.message_id,
+            text="🍎 Apple Music: скачиваю AAC 256 kbps...",
+        )
+
+        audio_file, cover_file = await downloader.download_track(parsed["url"])
+
+        if audio_file:
+            await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url, "Apple Music")
+        else:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_message.message_id,
+                text="❌ Apple Music: не удалось скачать файл.",
+            )
+    except AppleMusicError as e:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=sent_message.message_id,
+            text=e.user_message,
+            parse_mode='Markdown',
+        )
+    except Exception as e:
+        logger.exception(f"❌ Apple Music: Ошибка: {e}")
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=sent_message.message_id,
+            text=f"❌ Apple Music: Ошибка: {e}",
+        )
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
+
+
 async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     downloader = SavifyDownloader()
     sent_message = await update.message.reply_text("⏳ Начинаю поиск на Spotify...")
@@ -328,7 +484,10 @@ async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_T
             await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="❌ Аудиофайл не найден.")
             return
 
-        embed_cover_art(initial_audio_file, initial_cover_file)
+        if initial_cover_file and has_embedded_cover(initial_audio_file):
+            logger.info("ℹ️ Обложка уже встроена в файл — повторное встраивание не нужно.")
+        else:
+            embed_cover_art(initial_audio_file, initial_cover_file)
         await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="💿 Обработка файла...")
         size_mb = file_manager.get_file_size_mb(initial_audio_file)
         audio_file_to_send = initial_audio_file
@@ -348,33 +507,40 @@ async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_T
             track_details = _get_metadata_from_qobuz_path(audio_file_to_send)
         
         real_quality = file_manager.get_audio_quality(audio_file_to_send) or "N/A"
+        if source == "Apple Music":
+            # Для m4a mutagen показывает bits_per_sample=16 и получается
+            # «16-bit / 44.1 kHz», что читается как lossless. На деле это AAC,
+            # поэтому показываем реальный кодек и битрейт.
+            real_quality = _apple_quality_label(audio_file_to_send) or real_quality
         custom_filename = f"{track_details.get('artist', 'Unknown')} - {track_details.get('title', 'Unknown')}{audio_file_to_send.suffix}"
 
-        caption_text = (
-            f"🎼 **{track_details.get('title', 'N/A')}**\n"
-            f"👤 `{track_details.get('artist', 'N/A')}`\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"💿 **Альбом:** {track_details.get('album', 'N/A')}\n"
-            f"📅 **Год:** {track_details.get('year', 'N/A')}\n"
-            f"✨ **Качество:** {real_quality}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📥 [Скачано с {source}]({url_for_caption})"
-        )
+        caption_text = _build_caption(track_details, real_quality, source, url_for_caption)
 
         # 1. ОТПРАВЛЯЕМ ОБЛОЖКУ С КРАСИВОЙ ПОДПИСЬЮ
         if initial_cover_file and initial_cover_file.exists():
-            with open(initial_cover_file, 'rb') as img:
-                await context.bot.send_photo(
-                    chat_id=chat_id, 
-                    photo=img, 
-                    caption=caption_text, 
+            cover_to_send = prepare_cover_for_telegram(initial_cover_file)
+            if cover_to_send:
+                if cover_to_send != initial_cover_file:
+                    files_to_delete.add(cover_to_send)
+                with open(cover_to_send, 'rb') as img:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=img,
+                        caption=caption_text,
+                        parse_mode='Markdown'
+                    )
+            else:
+                # Обложку не удалось ужать до лимита — отправляем только текст
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=caption_text,
                     parse_mode='Markdown'
                 )
         else:
             # Если обложки нет, отправляем только текст
             await context.bot.send_message(
-                chat_id=chat_id, 
-                text=caption_text, 
+                chat_id=chat_id,
+                text=caption_text,
                 parse_mode='Markdown'
             )
 
@@ -393,17 +559,74 @@ async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_T
 
 
 def _get_metadata_from_file(file_path: Path) -> dict:
+    """
+    Читает теги: ID3 (MP3), Vorbis (FLAC) и MP4-атомы (m4a от Apple Music).
+
+    easy=True обязателен: без него mutagen отдаёт у m4a сырые имена атомов
+    (©nam, ©ART, soal, sonm), а код ищет title/artist/album — в итоге все
+    поля выходили пустыми, подпись показывала Unknown. Для MP3 и FLAC
+    easy-режим возвращает ровно то же, что и раньше.
+    """
     details = {}
     try:
-        audio = mutagen.File(file_path)
+        audio = mutagen.File(file_path, easy=True)
         if not audio: return {}
         details['artist'] = audio.get('artist', ['N/A'])[0]
         details['title'] = audio.get('title', ['N/A'])[0]
         details['album'] = audio.get('album', ['N/A'])[0]
         year = audio.get('date', []) or audio.get('TDRC', []) or ['N/A']
-        details['year'] = re.sub(r'[^0-9]', '', str(year[0]))[:4]
+        details['year'] = re.sub(r'[^0-9]', '', str(year[0]))[:4] or 'N/A'
         return details
     except Exception: return {}
+
+
+def _build_caption(track_details: dict, quality: str, source: str, url: str) -> str:
+    """
+    Собирает лаконичную подпись без эмодзи:
+
+        *Трек*
+        Артист
+
+        Альбом · Год
+        Качество · Источник
+
+    Пустые поля и заглушки прошлых версий ('N/A', 'Unknown') опускаются,
+    а все подставляемые значения экранируются — иначе символы вроде '_'
+    в названии трека ломают разметку и Telegram отклоняет сообщение целиком.
+    """
+    placeholders = ('N/A', 'Unknown')
+
+    title = track_details.get('title') or 'Без названия'
+    artist = track_details.get('artist') or ''
+    album = track_details.get('album') or ''
+    year = track_details.get('year') or ''
+
+    caption = f"*{_md_escape(title)}*"
+    if artist and artist not in placeholders:
+        caption += f"\n{_md_escape(artist)}"
+
+    album_year = [p for p in (album, year) if p and p not in placeholders]
+    if album_year:
+        caption += "\n\n" + " · ".join(_md_escape(p) for p in album_year)
+
+    quality_line = [p for p in (quality,) if p and p not in placeholders]
+    safe_url = str(url).replace(")", "\\)")
+    quality_line.append(f"[{_md_escape(source)}]({safe_url})")
+    caption += "\n" + " · ".join(quality_line)
+
+    return caption
+
+
+def _apple_quality_label(audio_file: Path) -> Optional[str]:
+    """Реальное качество файла Apple Music: кодек AAC и его битрейт."""
+    try:
+        audio = mutagen.File(audio_file)
+        bitrate = getattr(audio.info, "bitrate", 0)
+        if bitrate:
+            return f"AAC {round(bitrate / 1000)} kbps"
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось определить качество {audio_file.name}: {e}")
+    return None
 
 
 def _get_metadata_from_qobuz_path(audio_file: Path) -> dict:

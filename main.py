@@ -8,6 +8,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 
 from bot.handlers import start, help_command, handle_download, handle_audio_recognition, set_token, add_user, remove_user, list_users
 from services import whitelist
+from services.sources import SUPPORTED_URL_PATTERN
 from config import Config
 from dotenv import load_dotenv
 
@@ -62,8 +63,11 @@ def main():
     from bot.handlers import handle_callback_query
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     
+    # Шаблон общий с роутером (services/sources.py), чтобы списки доменов
+    # не разъезжались: раньше фильтр молча отбрасывал ссылки, которые
+    # роутер умел обрабатывать.
     app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.Regex(r"https?:\/\/(open|play)\.(qobuz|spotify)\.com\/"), 
+        filters.TEXT & ~filters.COMMAND & filters.Regex(SUPPORTED_URL_PATTERN),
         handle_download
     ))
     

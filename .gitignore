@@ -1,7 +1,26 @@
+# --- Секреты ---
+# cookies Apple Music = доступ к аккаунту.
+# Шаблон со звёздочкой покрывает cookies.txt.bak и прочие копии.
+cookies*
+*.cookies.txt
 .env
+
+# --- Скачанная музыка ---
+# Прежний шаблон Qobuz_Downloads/ не совпадал с реальным путём Qobuz/Downloads,
+# поэтому скачанные файлы попадали в git как untracked.
+Qobuz/Downloads/
+AppleMusic/Downloads/
+Qobuz_Downloads/
+
+# --- Окружения ---
+venv/
+# отдельное окружение gamdl: конфликтует с зависимостями бота
+gamdl-venv/
+
+# --- Прочее ---
 __pycache__/
 *.pyc
-Qobuz_Downloads/
+*.bak
+*.bak-*
 bot.log
-venv/
 repomix-output.xml

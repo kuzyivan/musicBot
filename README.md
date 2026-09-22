@@ -1,10 +1,10 @@
 # 🎵 KuzyMusicBot
 
-Telegram-бот для скачивания музыки с **Qobuz** и **Spotify** с поддержкой Hi-Res аудио и распознавания треков.
+Telegram-бот для скачивания музыки с **Qobuz**, **Spotify** и **Apple Music** с поддержкой Hi-Res аудио и распознавания треков.
 
 ## ✨ Возможности
 
-- **⬇️ Скачивание по ссылке** — треки и альбомы с Qobuz и Spotify
+- **⬇️ Скачивание по ссылке** — треки и альбомы с Qobuz, Spotify и Apple Music
 - **💿 Hi-Res качество** — до 24-bit/192kHz (Qobuz Studio)
 - **🎧 Распознавание музыки** — отправь голосовое или аудио, бот найдёт трек и скачает
 - **📀 Выбор трека из альбома** — inline-кнопки для выбора конкретного трека
@@ -80,7 +80,27 @@ SPOTIPY_CLIENT_SECRET=client_secret_spotify
 
 Когда токен истечёт — бот сам пришлёт напоминание. Обновить можно командой `/settoken <новый_токен>` прямо в чате.
 
-### 6. Настрой streamrip
+### 6. Настрой Apple Music
+
+Нужна активная подписка Apple Music. Скачивание идёт по cookie `media-user-token` — пароль нигде не хранится.
+
+1. Открой [music.apple.com](https://music.apple.com) в браузере, где выполнен вход
+2. Выгрузи cookies расширением **Get cookies.txt LOCALLY** (Chrome) или **Export Cookies** (Firefox)
+3. Положи файл как `cookies.txt` в корень проекта, права `chmod 600`
+
+Проверить файл:
+
+```bash
+python3 check_cookies.py          # проверить
+python3 check_cookies.py --fix    # заодно исправить пробелы вместо табов
+```
+
+Две вещи, о которых стоит знать заранее:
+
+- **Качество — AAC 256 kbps.** Hi-Res (ALAC) Apple отдаёт только через wrapper-демон, которому нужно передать Apple ID и пароль — в боте это намеренно не используется.
+- **Каталог ограничен регионом подписки.** Если подписка оформлена на US, треки, доступные только в других регионах, скачать нельзя ни по какой ссылке — бот сообщит об этом и предложит поискать на Qobuz.
+
+### 7. Настрой streamrip
 
 ```bash
 source venv/bin/activate
@@ -95,7 +115,7 @@ email_or_userid = "твой_user_id_на_qobuz"
 password_or_token = "токен_из_шага_5"
 ```
 
-### 7. Запусти бота
+### 8. Запусти бота
 
 ```bash
 python main.py
@@ -116,6 +136,7 @@ sudo systemctl enable musicbot
 | Telegram | python-telegram-bot |
 | Загрузчик Qobuz | streamrip |
 | Загрузчик Spotify | savify |
+| Загрузчик Apple Music | gamdl 3.8.5 (отдельное окружение `gamdl-venv`) |
 | Распознавание | AudD.io API |
 | Обработка аудио | FFmpeg |
 
@@ -125,15 +146,20 @@ sudo systemctl enable musicbot
 musicBot/
 ├── main.py                  # Точка входа, регистрация хендлеров
 ├── config.py                # Конфигурация из .env
+├── check_cookies.py         # Проверка cookies.txt для Apple Music
+├── cookies.txt              # Cookies Apple Music (не в репозитории)
 ├── whitelist.json           # Список разрешённых пользователей
 ├── bot/
 │   └── handlers.py          # Обработчики команд и сообщений
 ├── services/
+│   ├── sources.py           # Распознавание источника по ссылке
 │   ├── downloader.py        # Загрузка с Qobuz через streamrip
 │   ├── savify_downloader.py # Загрузка со Spotify
+│   ├── apple_music_downloader.py # Загрузка с Apple Music через gamdl
 │   ├── recognizer.py        # Распознавание аудио
 │   ├── file_manager.py      # Работа с файлами
 │   └── whitelist.py         # Управление whitelist
+├── AppleMusic/Downloads/    # Временная папка Apple Music
 └── Qobuz/Downloads/         # Временная папка для скачивания
 ```
 
@@ -141,4 +167,5 @@ musicBot/
 
 - Для скачивания с Qobuz необходима **платная подписка** (Studio или Sublime)
 - Токен Qobuz истекает периодически — бот уведомит когда придёт время обновить
-- Файл `.env` и `whitelist.json` не попадают в репозиторий (`.gitignore`)
+- Для Apple Music нужна **активная подписка**; качество — AAC 256 kbps, каталог ограничен регионом подписки
+- Файлы `.env`, `whitelist.json`, `cookies.txt` и скачанная музыка в репозиторий не попадают (`.gitignore`)
