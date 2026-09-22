@@ -20,8 +20,9 @@ _COUNTRY_RE = re.compile(r"^[a-z]{2}$", re.IGNORECASE)
 DEFAULT_STOREFRONT = "us"
 
 # Публичный поиск по каталогу Apple: нужен потому, что gamdl принимает только
-# готовые ссылки. Авторизации не требует.
+# готовые ссылки и списка треков не отдаёт. Авторизации не требуют.
 ITUNES_SEARCH_URL = "https://itunes.apple.com/search"
+ITUNES_LOOKUP_URL = "https://itunes.apple.com/lookup"
 
 
 def _http_host_re(host: str) -> re.Pattern:
@@ -183,6 +184,77 @@ class AppleMusicDownloader:
         if not self.cookies_path.exists():
             raise AppleMusicError(build_cookies_hint())
 
+    async def get_album_info(self, url: str) -> Optional[dict]:
+        """
+        Список треков альбома — для инлайн-клавиатуры выбора.
+
+        gamdl умеет качать альбом целиком, но состава не отдаёт, поэтому
+        треки берём из публичного iTunes Lookup API (entity=song).
+        Страна — из cookies аккаунта: Apple отдаёт только регион подписки.
+        """
+        import httpx
+
+        parsed = parse_apple_url(url, storefront=self.account_storefront())
+        if not parsed or parsed["kind"] != "album":
+            return None
+
+        params = {
+            "id": parsed["id"],
+            "entity": "song",
+            "limit": 200,
+            "country": parsed["storefront"],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.get(ITUNES_LOOKUP_URL, params=params)
+            if response.status_code != 200:
+                logger.warning(f"⚠️ Apple Music: список треков вернул {response.status_code}")
+                return None
+            results = response.json().get("results", [])
+        except Exception as e:
+            logger.warning(f"⚠️ Apple Music: ошибка получения альбома: {e}")
+            return None
+
+        album_title = ""
+        artist = ""
+        tracks = []
+        for item in results:
+            # Первым в ответе идёт сам альбом, дальше — его треки
+            if item.get("wrapperType") == "collection":
+                album_title = item.get("collectionName", "")
+                artist = item.get("artistName", "")
+                continue
+            if item.get("wrapperType") != "track" or not item.get("trackViewUrl"):
+                continue
+
+            canonical = parse_apple_url(item["trackViewUrl"], storefront=parsed["storefront"])
+            if not canonical or canonical["kind"] != "track":
+                continue
+
+            tracks.append(
+                {
+                    "title": item.get("trackName", ""),
+                    "url": canonical["url"],
+                    "disc": item.get("discNumber", 1) or 1,
+                    "number": item.get("trackNumber", 0) or 0,
+                }
+            )
+
+        if not tracks:
+            return None
+
+        # Порядок как на релизе: сначала диск, потом номер трека
+        tracks.sort(key=lambda t: (t["disc"], t["number"]))
+        for index, track in enumerate(tracks, 1):
+            track["index"] = index
+
+        return {
+            "title": album_title or parsed["id"],
+            "artist": artist,
+            # ограничение как у Qobuz и Spotify: клавиатура не должна быть бесконечной
+            "tracks": tracks[:50],
+        }
+
     async def search_and_download_lucky(
         self,
         artist: str,
@@ -237,14 +309,38 @@ class AppleMusicDownloader:
     async def download_track(
         self,
         url: str,
+        track_index: Optional[int] = None,
         progress_callback: Optional[Callable[[float], Awaitable[None]]] = None,
     ) -> Tuple[Optional[Path], Optional[Path]]:
         """
         Скачивает трек по ссылке music.apple.com.
 
-        Возвращает (аудиофайл, обложка) или (None, None), если скачать не удалось.
-        Бросает AppleMusicError, если проблема в credentials — текст готов для юзера.
+        Ссылка на альбом тоже принимается: с track_index (нумерация с 1) берётся
+        конкретный трек, без него — первый (весь альбом качает вызывающая сторона,
+        чтобы отправлять файлы по мере готовности).
         """
+        parsed = parse_apple_url(url, storefront=self.account_storefront())
+        if not parsed:
+            raise AppleMusicError("❌ Apple Music: не удалось разобрать ссылку.")
+
+        if parsed["kind"] == "track":
+            url = parsed["url"]
+
+        elif parsed["kind"] == "album":
+            album_info = await self.get_album_info(url)
+            if not album_info or not album_info["tracks"]:
+                raise AppleMusicError("❌ Apple Music: не удалось получить список треков альбома.")
+            index = track_index or 1
+            if not 1 <= index <= len(album_info["tracks"]):
+                raise AppleMusicError(f"❌ Apple Music: в альбоме нет трека №{index}.")
+            url = album_info["tracks"][index - 1]["url"]
+
+        else:
+            raise AppleMusicError(
+                f"🍎 Apple Music: ссылки типа «{parsed['type']}» не поддерживаются.\n\n"
+                "Пришлите ссылку на трек или альбом."
+            )
+
         self._check_ready()
         logger.info(f"⬇️ Apple Music: скачивание {url}")
 

@@ -289,7 +289,11 @@ async def handle_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await _download_spotify(update, context, url)
     elif source == "apple":
-        await _download_apple_music(update, context, url)
+        parsed = parse_apple_url(url, storefront=AppleMusicDownloader().account_storefront())
+        if parsed and parsed["kind"] == "album":
+            await _show_apple_album_tracks(update, context, url)
+        else:
+            await _download_apple_music(update, context, url)
     else:
         await update.message.reply_text("❌ Пожалуйста, отправьте корректную ссылку на Qobuz, Spotify или Apple Music.")
 
@@ -382,6 +386,20 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await _download_spotify(update, context, url, track_index=int(action))
         return
 
+    if data.startswith("adl:"):
+        url = context.user_data.get("last_apple_album_url")
+        if not url:
+            await query.edit_message_text("❌ Ошибка: ссылка потеряна. Отправьте её заново.")
+            return
+        action = data.split(":", 1)[1]
+        if action == "all":
+            await query.edit_message_text("⏳ Скачиваю весь альбом...")
+            await _download_apple_album(update, context, url)
+        else:
+            await query.edit_message_text(f"⏳ Скачиваю трек №{action}...")
+            await _download_apple_music(update, context, url, track_index=int(action))
+        return
+
     if not data.startswith("qdl:"): return
     url = context.user_data.get('last_album_url')
     if not url:
@@ -427,55 +445,59 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
         typing_task.cancel()
 
 
-def _apple_link_hint(media_type: str) -> str:
-    """Объясняет, почему ссылка такого типа не подходит."""
-    common = (
-        "В приложении: «Поделиться» → «Скопировать ссылку» на самом треке.\n"
-        "Ссылка выглядит так:\n"
-        "`https://music.apple.com/ru/album/название/1559885420?i=1559885421`"
+async def _show_apple_album_tracks(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    """Показывает список треков альбома Apple Music с кнопками."""
+    downloader = AppleMusicDownloader()
+    sent_message = await update.message.reply_text("⏳ Apple Music: получаю список треков альбома...")
+
+    album_info = await downloader.get_album_info(url)
+    if not album_info or not album_info["tracks"]:
+        await sent_message.edit_text("❌ Apple Music: не удалось получить список треков альбома.")
+        return
+
+    text = (
+        f"*{_md_escape(album_info['title'])}*\n"
+        f"{_md_escape(album_info['artist'])}\n\n"
+        "Выберите трек:"
     )
-    if media_type == "album":
-        return "🍎 Apple Music: ссылка ведёт на весь альбом, а бот отправляет один файл.\n\n" + common
-    if media_type == "library":
-        return (
-            "🍎 Apple Music: ссылки из «Медиатеки» пока не поддерживаются.\n\n"
-            "Откройте трек в каталоге Apple Music и пришлите ссылку оттуда."
+
+    keyboard = []
+    current_row = []
+    for track in album_info["tracks"]:
+        button = InlineKeyboardButton(
+            f"{track['index']}. {track['title']}", callback_data=f"adl:{track['index']}"
         )
-    return f"🍎 Apple Music: ссылки типа «{media_type}» не поддерживаются.\n\n" + common
+        current_row.append(button)
+        if len(current_row) == 2:
+            keyboard.append(current_row)
+            current_row = []
+    if current_row:
+        keyboard.append(current_row)
+
+    keyboard.append([InlineKeyboardButton("📥 Скачать весь альбом", callback_data="adl:all")])
+    context.user_data["last_apple_album_url"] = url
+    await sent_message.edit_text(
+        text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+    )
 
 
-async def _download_apple_music(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+async def _download_apple_music(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, track_index: Optional[int] = None):
     """
-    Скачивание трека из Apple Music через gamdl.
+    Скачивание из Apple Music через gamdl.
 
-    Ссылка сначала приводится к каноничному виду: gamdl принимает строго
+    Ссылку приводит к каноничному виду уже сервис: gamdl принимает строго
     https, только домены music/classical.music.apple.com и обязательно с кодом
     страны. Поэтому ссылки вида geo.music.apple.com, itunes.apple.com, http://
     или без /ru/ иначе падали бы с ошибкой разбора URL.
     """
     downloader = AppleMusicDownloader()
-    parsed = parse_apple_url(url, storefront=downloader.account_storefront())
-
-    if parsed is None:
-        logger.warning(f"⚠️ Apple Music: не удалось разобрать ссылку {url}")
-        await update.message.reply_text(
-            "❌ Apple Music: не удалось разобрать ссылку. Пришлите ссылку на трек из каталога."
-        )
-        return
-
-    if parsed["kind"] != "track":
-        logger.info(f"ℹ️ Apple Music: ссылка типа '{parsed['type']}' не поддерживается")
-        await update.message.reply_text(_apple_link_hint(parsed["type"]))
-        return
-
-    if parsed["url"] != url:
-        logger.info(f"🔗 Apple Music: ссылка приведена к виду {parsed['url']}")
-
-    sent_message = await update.message.reply_text("⏳ Apple Music: готовлю скачивание...")
-    chat_id = update.effective_chat.id
+    # Вызывается и из кнопок, где update.message отсутствует
+    target_update = update.callback_query if update.callback_query else update
+    chat_id = target_update.message.chat_id
 
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
+    sent_message = await context.bot.send_message(chat_id=chat_id, text="⏳ Apple Music: готовлю скачивание...")
     try:
         await context.bot.edit_message_text(
             chat_id=chat_id,
@@ -483,7 +505,7 @@ async def _download_apple_music(update: Update, context: ContextTypes.DEFAULT_TY
             text="🍎 Apple Music: скачиваю AAC 256 kbps...",
         )
 
-        audio_file, cover_file = await downloader.download_track(parsed["url"])
+        audio_file, cover_file = await downloader.download_track(url, track_index=track_index)
 
         if audio_file:
             await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url, "Apple Music")
@@ -510,6 +532,73 @@ async def _download_apple_music(update: Update, context: ContextTypes.DEFAULT_TY
     finally:
         stop_typing.set()
         typing_task.cancel()
+
+
+async def _download_apple_album(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    """
+    Скачивает и отправляет все треки альбома Apple Music по очереди.
+
+    Одно сервисное сообщение переиспользуется под прогресс: иначе на альбом
+    из десятка треков в чат сыпались бы десятки служебных строк.
+    """
+    downloader = AppleMusicDownloader()
+    target_update = update.callback_query if update.callback_query else update
+    chat_id = target_update.message.chat_id
+    sent_message = await context.bot.send_message(chat_id=chat_id, text="⏳ Apple Music: получаю список треков...")
+
+    album_info = await downloader.get_album_info(url)
+    if not album_info or not album_info["tracks"]:
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=sent_message.message_id,
+            text="❌ Apple Music: не удалось получить список треков альбома.",
+        )
+        return
+
+    tracks = album_info["tracks"]
+    sent_count = 0
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id, stop_typing))
+    try:
+        for track in tracks:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_message.message_id,
+                text=(
+                    f"⏳ {_md_escape(album_info['title'])}\n"
+                    f"Трек {track['index']} из {len(tracks)}: {_md_escape(track['title'])}"
+                ),
+                parse_mode="Markdown",
+            )
+
+            audio_file, cover_file = await downloader.download_track(track["url"])
+            if not audio_file:
+                logger.warning(f"⚠️ Apple Music: трек «{track['title']}» не скачался, пропускаю")
+                continue
+
+            await process_and_send_audio(
+                update, context, sent_message, audio_file, cover_file, url,
+                "Apple Music", keep_status_message=True,
+            )
+            sent_count += 1
+    except AppleMusicError as e:
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=sent_message.message_id,
+            text=e.user_message, parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.exception(f"❌ Apple Music: Ошибка при скачивании альбома: {e}")
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
+        except Exception:
+            pass
+
+    if sent_count == 0:
+        await context.bot.send_message(chat_id=chat_id, text="❌ Apple Music: не удалось скачать ни одного трека.")
+    else:
+        logger.info(f"✅ Apple Music: из альбома отправлено треков — {sent_count} из {len(tracks)}")
 
 
 async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, track_index: Optional[int] = None):
