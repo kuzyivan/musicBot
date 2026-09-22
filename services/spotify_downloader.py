@@ -126,9 +126,13 @@ class SpotifyDownloader:
 
         self._clear_temp_dir()
 
+        # Источники по убыванию качества: Hi-Res → AAC 256 → YouTube-рип
         audio_file = await self._download_from_qobuz(meta)
         if not audio_file:
-            logger.info("⚠️ Spotify: на Qobuz не найдено, беру с YouTube")
+            logger.info("⚠️ Spotify: на Qobuz не найдено, пробую Apple Music")
+            audio_file = await self._download_from_apple(meta)
+        if not audio_file:
+            logger.info("⚠️ Spotify: на Apple Music не найдено, беру с YouTube")
             audio_file = await self._download_from_youtube(meta)
 
         if not audio_file:
@@ -155,6 +159,33 @@ class SpotifyDownloader:
             return None
         except Exception as e:
             logger.warning(f"⚠️ Spotify: Qobuz недоступен ({e}), откат на YouTube")
+            return None
+
+    async def _download_from_apple(self, meta: dict) -> Optional[Path]:
+        """AAC 256 kbps из Apple Music по метаданным Spotify."""
+        from services.apple_music_downloader import AppleMusicDownloader, AppleMusicError
+
+        try:
+            downloader = AppleMusicDownloader()
+            if not downloader.is_configured():
+                logger.info("ℹ️ Spotify: Apple Music пропущен — не настроены cookies")
+                return None
+
+            audio_file, _ = await downloader.search_and_download_lucky(
+                meta["artist"], meta["title"]
+            )
+            if audio_file:
+                logger.info(f"✅ Spotify→Apple Music: получен {audio_file.name}")
+                self.last_source = "Apple Music"
+            return audio_file
+        except AppleMusicError as e:
+            # Нет подписки, протухшие cookies, трек вне региона — не повод
+            # падать, просто идём на YouTube
+            first_line = e.user_message.splitlines()[0]
+            logger.info(f"ℹ️ Spotify: Apple Music недоступен — {first_line}")
+            return None
+        except Exception as e:
+            logger.warning(f"⚠️ Spotify: Apple Music ошибка ({e}), откат на YouTube")
             return None
 
     async def _download_from_youtube(self, meta: dict) -> Optional[Path]:

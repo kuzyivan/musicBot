@@ -19,6 +19,10 @@ _COUNTRY_RE = re.compile(r"^[a-z]{2}$", re.IGNORECASE)
 
 DEFAULT_STOREFRONT = "us"
 
+# Публичный поиск по каталогу Apple: нужен потому, что gamdl принимает только
+# готовые ссылки. Авторизации не требует.
+ITUNES_SEARCH_URL = "https://itunes.apple.com/search"
+
 
 def _http_host_re(host: str) -> re.Pattern:
     """Ссылка с любым поддоменом (geo., classical., www.) и любой схемой."""
@@ -178,6 +182,57 @@ class AppleMusicDownloader:
             )
         if not self.cookies_path.exists():
             raise AppleMusicError(build_cookies_hint())
+
+    async def search_and_download_lucky(
+        self,
+        artist: str,
+        title: str,
+    ) -> Tuple[Optional[Path], Optional[Path]]:
+        """
+        Ищет трек по метаданным и скачивает найденное.
+
+        gamdl умеет только ссылки, поэтому ищем через публичный iTunes Search API
+        (без авторизации) и отдаём найденный trackViewUrl ему. Страну берём из
+        cookies аккаунта: Apple отдаёт лишь то, что есть в регионе подписки.
+        """
+        url = await self._search_track_url(artist, title)
+        if not url:
+            return None, None
+
+        # iTunes отдаёт ссылку с трекингом (&uo=4); приводим к каноничному виду,
+        # который gamdl принимает гарантированно
+        parsed = parse_apple_url(url, storefront=self.account_storefront())
+        if not parsed or parsed["kind"] != "track":
+            logger.warning(f"⚠️ Apple Music: поиск вернул неожиданную ссылку {url}")
+            return None, None
+
+        logger.info(f"🔍 Apple Music: найден трек, скачиваю {parsed['url']}")
+        return await self.download_track(parsed["url"])
+
+    async def _search_track_url(self, artist: str, title: str) -> Optional[str]:
+        import httpx
+
+        query = f"{artist} {title}".strip()
+        params = {
+            "term": query,
+            "entity": "song",
+            "limit": 1,
+            "country": self.account_storefront(),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.get(ITUNES_SEARCH_URL, params=params)
+            if response.status_code != 200:
+                logger.warning(f"⚠️ Apple Music: поиск вернул {response.status_code}")
+                return None
+            results = response.json().get("results", [])
+            if not results:
+                logger.info(f"ℹ️ Apple Music: по запросу '{query}' ничего не найдено")
+                return None
+            return results[0].get("trackViewUrl")
+        except Exception as e:
+            logger.warning(f"⚠️ Apple Music: ошибка поиска: {e}")
+            return None
 
     async def download_track(
         self,
