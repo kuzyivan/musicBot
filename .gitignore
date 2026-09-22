@@ -5,6 +5,11 @@ cookies*
 *.cookies.txt
 .env
 
+# --- Состояние на сервере ---
+# whitelist.json меняет сам бот командой /adduser. Пока файл был в репозитории,
+# каждый деплой делал git reset --hard и откатывал добавленных пользователей.
+whitelist.json
+
 # --- Скачанная музыка ---
 # Прежний шаблон Qobuz_Downloads/ не совпадал с реальным путём Qobuz/Downloads,
 # поэтому скачанные файлы попадали в git как untracked.
@@ -22,5 +27,6 @@ __pycache__/
 *.pyc
 *.bak
 *.bak-*
+logs/
 bot.log
 repomix-output.xml

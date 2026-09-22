@@ -19,42 +19,49 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            set -e # <-- ВАЖНО! Останавливает скрипт при любой ошибке.
+            set -e
 
             APP_DIR="/root/musicBot"
             REPO_URL="https://github.com/kuzyivan/musicBot.git"
-            
+
             echo "📁 Проверка директории $APP_DIR..."
-            
-            # --- НОВАЯ ЛОГИКА ОБНОВЛЕНИЯ КОДА ---
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "🤔 .git папка не найдена. Клонируем репозиторий..."
               rm -rf "$APP_DIR"
               git clone "$REPO_URL" "$APP_DIR"
-              cd "$APP_DIR"
-            else
-              echo "👍 .git папка найдена. Обновляем код..."
-              cd "$APP_DIR"
-              git config --global --add safe.directory "$APP_DIR"
-              git fetch origin main
-              git reset --hard origin/main
-              git clean -fd
             fi
-            # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
 
-            echo "🤫 Создание .env файла из секретов..."
-            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
-            echo "QOBUZ_LOGIN=${{ secrets.QOBUZ_LOGIN }}" >> .env
-            echo "QOBUZ_PASSWORD=${{ secrets.QOBUZ_PASSWORD }}" >> .env
-            echo "AUDD_API_TOKEN=${{ secrets.AUDD_API_TOKEN }}" >> .env
-            echo "SPOTIPY_CLIENT_ID=${{ secrets.SPOTIPY_CLIENT_ID }}" >> .env
-            echo "SPOTIPY_CLIENT_SECRET=${{ secrets.SPOTIPY_CLIENT_SECRET }}" >> .env
-            echo "✅ .env файл создан."
+            cd "$APP_DIR"
+            git config --global --add safe.directory "$APP_DIR"
 
-            # --- БЛОК QOBUZ УДАЛЕН ---
-            # Конфигурация Qobuz теперь выполняется вручную на сервере
-            # командой 'qobuz-dl -r' и больше не перезаписывается.
-            echo "⚙️ Пропуск создания config.ini (управляется вручную)."
+            echo "🔄 Обновление кода..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            # git clean здесь намеренно НЕ вызывается. В каталоге лежит состояние,
+            # которого нет в репозитории: .env, cookies.txt, whitelist.json,
+            # venv/, gamdl-venv/, logs/. Сейчас всё это под .gitignore, но один
+            # прогон с флагом -x сотрёт ключи и список пользователей.
+
+            # .env НЕ пересоздаётся, если уже существует: команда /settoken пишет
+            # токен Qobuz прямо в него, а в секретах GitHub нет QOBUZ_AUTH_TOKEN
+            # и ADMIN_USER_ID — перезапись ломала бы админ-команды и выбор треков.
+            if [ ! -f .env ]; then
+              echo "🤫 .env не найден — создаю из секретов..."
+              echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
+              echo "QOBUZ_LOGIN=${{ secrets.QOBUZ_LOGIN }}" >> .env
+              echo "QOBUZ_PASSWORD=${{ secrets.QOBUZ_PASSWORD }}" >> .env
+              echo "AUDD_API_TOKEN=${{ secrets.AUDD_API_TOKEN }}" >> .env
+              echo "SPOTIPY_CLIENT_ID=${{ secrets.SPOTIPY_CLIENT_ID }}" >> .env
+              echo "SPOTIPY_CLIENT_SECRET=${{ secrets.SPOTIPY_CLIENT_SECRET }}" >> .env
+              echo "⚠️ Добавьте в .env ADMIN_USER_ID и QOBUZ_AUTH_TOKEN — они не приходят из секретов."
+            else
+              echo "✅ .env уже существует — оставляю без изменений."
+            fi
+
+            if [ ! -f cookies.txt ]; then
+              echo "⚠️ cookies.txt для Apple Music не найден — бот попросит его при первой загрузке."
+            fi
 
             echo "🐍 Настройка виртуального окружения..."
             if [ ! -d "venv" ]; then
@@ -65,18 +72,31 @@ jobs:
             echo "📦 Установка зависимостей Python..."
             pip install --upgrade pip
             pip install -r requirements.txt
-            
+
             echo "🔧 Установка YouTube загрузчиков..."
             pip uninstall -y youtube-dl yt-dlp yt-dlp-compat-youtube-dl
             pip install -U youtube-dl
             pip install -U yt-dlp
 
+            # gamdl держим в отдельном окружении: он требует httpx>=0.28.1,
+            # а python-telegram-bot 20.7 пинит httpx~=0.25.2 — установка в общий
+            # venv сломала бы бота. Версия 3.8.5 закреплена: в 3.9 сломан aac-web.
+            echo "🍎 Настройка окружения Apple Music (gamdl)..."
+            if [ ! -d "gamdl-venv" ]; then
+              python3.11 -m venv gamdl-venv
+            fi
+            ./gamdl-venv/bin/pip install -q --upgrade pip
+            ./gamdl-venv/bin/pip install -q "gamdl==3.8.5"
+
             echo "📁 Создание необходимых директорий..."
             mkdir -p logs
             mkdir -p Qobuz/Downloads
-            
+            mkdir -p AppleMusic/Downloads
+
             echo "♻️ Перезапуск сервиса musicbot..."
             systemctl daemon-reload
             systemctl restart musicbot.service
+            sleep 3
+            systemctl is-active musicbot.service
 
             echo "✅ Развертывание успешно завершено!"

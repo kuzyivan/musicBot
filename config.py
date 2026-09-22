@@ -24,7 +24,10 @@ class Config:
 
     QOBUZ_AUTH_TOKEN = os.getenv("QOBUZ_AUTH_TOKEN", "")
 
-    ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
+    # `or "0"` — защита от пустой переменной: GitHub Actions подставляет
+    # несуществующий секрет как пустую строку, и int("") уронил бы бота при старте.
+
+    ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID") or "0")
 
     ALLOWED_USERS: set = {
         int(uid.strip())
