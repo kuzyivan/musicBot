@@ -33,4 +33,10 @@ __pycache__/
 *.bak-*
 logs/
 bot.log
+# логи не должны попадать в репозиторий ни под каким именем
+*.log
+# метаданные macOS
+.DS_Store
+# собранные артефакты
+*.whl
 repomix-output.xml
