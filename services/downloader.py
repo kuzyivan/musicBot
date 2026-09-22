@@ -150,16 +150,34 @@ class QobuzDownloader:
         )
 
         all_output = []
-        while True:
-            line_bytes = await process.stdout.readline()
-            if not line_bytes:
-                break
-            line = re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', line_bytes.decode("utf-8", errors="ignore")).strip()
-            if line:
-                all_output.append(line)
-                logger.debug(f"rip: {line}")
 
-        await process.wait()
+        async def _read_and_wait():
+            while True:
+                line_bytes = await process.stdout.readline()
+                if not line_bytes:
+                    break
+                line = re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', line_bytes.decode("utf-8", errors="ignore")).strip()
+                if line:
+                    all_output.append(line)
+                    logger.debug(f"rip: {line}")
+            await process.wait()
+
+        # Жёсткий таймаут на всю загрузку: зависший rip (например, мёртвый сокет
+        # Qobuz) больше не вешает воркер и весь бот. По таймауту убиваем подпроцесс.
+        RIP_TIMEOUT = 600  # сек
+        try:
+            await asyncio.wait_for(_read_and_wait(), timeout=RIP_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ rip превысил таймаут {RIP_TIMEOUT}s — убиваю подпроцесс")
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                pass
+            return None, None
 
         if process.returncode != 0:
             output_text = "\n".join(all_output)
