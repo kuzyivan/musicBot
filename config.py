@@ -71,6 +71,10 @@ class Config:
     SPOTIFY_DOWNLOAD_DIR = BASE_DIR / "Spotify" / "Downloads"
     YT_DLP_PATH = BASE_DIR / "venv" / "bin" / "yt-dlp"
 
+    # Netscape-cookies open.spotify.com: нужны sp_dc и sp_key для Canvas.
+    # Без файла бот просто не прикладывает Canvas к скачанной песне.
+    SPOTIFY_COOKIES = Path(os.getenv("SPOTIFY_COOKIES") or BASE_DIR / "spotify-cookies.txt")
+
     DOWNLOAD_DIR = BASE_DIR / "Qobuz/Downloads"
 
     MAX_FILE_SIZE_MB = 2000

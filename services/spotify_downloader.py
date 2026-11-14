@@ -57,6 +57,13 @@ class SpotifyDownloader:
         # Откуда реально пришёл файл: Spotify аудио не отдаёт, поэтому это
         # всегда другой сервис — и подпись должна называть его честно.
         self.last_source: Optional[str] = None
+        # Короткое вертикальное видео Canvas (mp4), если оно есть у трека.
+        # Необязательный бонус: без cookie или при сбое остаётся None.
+        self.last_canvas: Optional[Path] = None
+        self._canvas: Optional["SpotifyCanvasDownloader"] = None
+        # Одна неудача отключает Canvas до конца текущего альбома/плейлиста:
+        # иначе протухший sp_dc означал бы полсотни запросов к token endpoint.
+        self._canvas_failed = False
 
         if not all((Config.SPOTIPY_CLIENT_ID, Config.SPOTIPY_CLIENT_SECRET)):
             logger.error("!!! Spotify не будет работать без SPOTIPY_CLIENT_ID и SPOTIPY_CLIENT_SECRET !!!")
@@ -194,6 +201,7 @@ class SpotifyDownloader:
 
     async def download_track_by_id(self, track_id: str) -> Tuple[Optional[Path], Optional[Path]]:
         """Скачивает трек по его Spotify ID."""
+        self.last_canvas = None
         meta = self._get_track_metadata(track_id)
         logger.info(f"🎧 Spotify: {meta['artist']} — {meta['title']}")
         self._clear_temp_dir()
@@ -215,6 +223,10 @@ class SpotifyDownloader:
         # источник своей не дал — как YouTube.
         if not cover_file or not cover_file.exists():
             cover_file = await self._save_cover(meta.get("cover_url"), audio_file)
+
+        # Canvas привязан к Spotify ID, поэтому его можно получить независимо
+        # от того, откуда пришёл аудиофайл. Сбой Canvas не отменяет загрузку.
+        self.last_canvas = await self._download_canvas(track_id)
 
         return audio_file, cover_file
 
@@ -263,6 +275,36 @@ class SpotifyDownloader:
             )
 
         return await self.download_track_by_id(track_id)
+
+    async def _download_canvas(self, track_id: str) -> Optional[Path]:
+        """
+        Скачивает Spotify Canvas (вертикальный mp4) для трека.
+
+        Canvas — необязательное украшение: нет cookie, нет видео у трека или
+        приватный API изменился — просто возвращаем None и качаем музыку дальше.
+        """
+        try:
+            if self._canvas_failed:
+                return None
+
+            if self._canvas is None:
+                from services.spotify_canvas import SpotifyCanvasDownloader
+
+                self._canvas = SpotifyCanvasDownloader()
+                if not self._canvas.is_configured():
+                    logger.info(
+                        "ℹ️ Spotify Canvas пропущен: нет sp_dc в "
+                        f"{self._canvas.cookies_path.name}"
+                    )
+                    self._canvas_failed = True
+                    return None
+
+            return await self._canvas.download(track_id, self.download_dir)
+        except Exception as e:
+            # Ни одна ошибка Canvas не должна выглядеть как ошибка загрузки
+            logger.warning(f"⚠️ Spotify Canvas не получен: {e}")
+            self._canvas_failed = True
+            return None
 
     async def _download_from_qobuz(self, meta: dict) -> Tuple[Optional[Path], Optional[Path]]:
         """Hi-Res с Qobuz по метаданным Spotify."""

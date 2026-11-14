@@ -9,6 +9,7 @@ Telegram-бот для скачивания музыки с **Qobuz**, **Spotify
 - **🎧 Распознавание музыки** — отправь голосовое или аудио, бот найдёт трек и скачает
 - **📀 Выбор трека из альбома** — inline-кнопки для выбора конкретного трека
 - **🖼️ Обложки** — встраиваются в файл и отправляются отдельным фото
+- **🎬 Spotify Canvas** — к трекам Spotify дополнительно скачивается вертикальное мини-видео и отправляется в чат или канал GIF-анимацией
 - **🔄 Авто-конвертация** — если файл больше лимита Telegram, конвертируется в MP3 320 kbps
 - **👥 Whitelist** — доступ только для разрешённых пользователей
 - **🔑 Управление токеном** — обновление токена Qobuz прямо из чата
@@ -65,6 +66,9 @@ QOBUZ_AUTH_TOKEN=токен_из_браузера
 AUDD_API_TOKEN=токен_AudD
 SPOTIPY_CLIENT_ID=client_id_spotify
 SPOTIPY_CLIENT_SECRET=client_secret_spotify
+
+# Необязательно: путь к cookies Spotify для Canvas
+SPOTIFY_COOKIES=spotify-cookies.txt
 ```
 
 ### 5. Настрой токен Qobuz
@@ -115,7 +119,26 @@ email_or_userid = "твой_user_id_на_qobuz"
 password_or_token = "токен_из_шага_5"
 ```
 
-### 8. Запусти бота
+### 8. Настрой Spotify Canvas (необязательно)
+
+Canvas — это 3–8-секундное вертикальное видео, которое Spotify показывает поверх обложки. Бот скачивает его вместе с треком и отправляет в чат или канал GIF-анимацией. Официального API у Canvas нет, поэтому используются те же cookies, что и у плагина `yt-dlp-SpotifyCanvas`.
+
+1. Открой [open.spotify.com](https://open.spotify.com) в браузере, где выполнен вход
+2. Нажми `F12` → вкладка **Application** → **Cookies** → `https://open.spotify.com`
+3. Скопируй значения `sp_dc` и `sp_key` (они `HttpOnly`, поэтому в `document.cookie` их не видно)
+4. Создай файл `spotify-cookies.txt` в корне проекта:
+
+```
+# Netscape HTTP Cookie File
+.spotify.com	TRUE	/	TRUE	2147483647	sp_dc	значение_sp_dc
+.spotify.com	TRUE	/	TRUE	2147483647	sp_key	значение_sp_key
+```
+
+Разделители — табы. Поставь права `chmod 600 spotify-cookies.txt`.
+
+Если файла нет или cookie протухли, бот просто скачает песню без Canvas — на загрузку музыки это не влияет. Путь к файлу можно переопределить переменной `SPOTIFY_COOKIES`.
+
+### 9. Запусти бота
 
 ```bash
 python main.py
@@ -136,6 +159,7 @@ sudo systemctl enable musicbot
 | Telegram | python-telegram-bot |
 | Загрузчик Qobuz | streamrip |
 | Загрузчик Spotify | spotipy (метаданные) + Qobuz или yt-dlp (файл) |
+| Spotify Canvas | приватный canvaz-cache API + ffmpeg (mp4 → GIF) |
 | Загрузчик Apple Music | gamdl 3.8.5 (отдельное окружение `gamdl-venv`) |
 | Распознавание | AudD.io API |
 | Обработка аудио | FFmpeg |
@@ -148,6 +172,7 @@ musicBot/
 ├── config.py                # Конфигурация из .env
 ├── check_cookies.py         # Проверка cookies.txt для Apple Music
 ├── cookies.txt              # Cookies Apple Music (не в репозитории)
+├── spotify-cookies.txt      # Cookies Spotify для Canvas (не в репозитории)
 ├── whitelist.json           # Список разрешённых пользователей
 ├── bot/
 │   └── handlers.py          # Обработчики команд и сообщений
@@ -155,6 +180,7 @@ musicBot/
 │   ├── sources.py           # Распознавание источника по ссылке
 │   ├── downloader.py        # Загрузка с Qobuz через streamrip
 │   ├── spotify_downloader.py # Загрузка по ссылке Spotify
+│   ├── spotify_canvas.py    # Spotify Canvas: mp4 + конвертация в GIF
 │   ├── apple_music_downloader.py # Загрузка с Apple Music через gamdl
 │   ├── recognizer.py        # Распознавание аудио
 │   ├── file_manager.py      # Работа с файлами
@@ -170,5 +196,6 @@ musicBot/
 - Для Apple Music нужна **активная подписка**; качество — AAC 256 kbps, каталог ограничен регионом подписки
 - Spotify аудио не отдаёт, поэтому ссылка используется как источник метаданных: трек ищется на **Qobuz** (Hi-Res), затем на **Apple Music** (AAC 256 kbps), и лишь при отсутствии — берётся с **YouTube** через yt-dlp. В подписи всегда указывается реальный источник, а не Spotify
 - Ссылка на **альбом или плейлист Spotify и Apple Music** показывает состав инлайн-кнопками: можно взять отдельный трек или скачать всё целиком. У Spotify недоступны редакционные и алгоритмические плейлисты (например, «Today's Top Hits») — их закрывает сам Spotify, бот сообщит об этом
+- **Spotify Canvas** — приватный API без документации: он может измениться в любой момент. Cookies `sp_dc`/`sp_key` дают боту доступ к вашему аккаунту Spotify, поэтому файл `spotify-cookies.txt` нельзя публиковать. Если Canvas перестанет скачиваться, песни продолжат загружаться, а в логе будет предупреждение
 - Состав плейлистов Apple берётся авторизованным API gamdl: публичный iTunes API плейлисты не отдаёт вовсе. Клавиатура показывает первые 50 треков
 - Файлы `.env`, `whitelist.json`, `cookies.txt` и скачанная музыка в репозиторий не попадают (`.gitignore`)

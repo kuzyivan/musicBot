@@ -3,6 +3,8 @@
 # Шаблон со звёздочкой покрывает cookies.txt.bak и прочие копии.
 cookies*
 *.cookies.txt
+# Netscape-cookies Spotify (sp_dc/sp_key) для Canvas
+spotify-cookies.txt
 .env
 
 # --- Состояние на сервере ---

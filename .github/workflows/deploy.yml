@@ -63,6 +63,10 @@ jobs:
               echo "⚠️ cookies.txt для Apple Music не найден — бот попросит его при первой загрузке."
             fi
 
+            if [ ! -f spotify-cookies.txt ]; then
+              echo "⚠️ spotify-cookies.txt не найден — Canvas к песням Spotify добавляться не будет."
+            fi
+
             echo "🐍 Настройка виртуального окружения..."
             if [ ! -d "venv" ]; then
               python3.11 -m venv venv

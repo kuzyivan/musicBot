@@ -6,6 +6,7 @@ from services import whitelist
 from services.spotify_downloader import SpotifyDownloader, SpotifyError, parse_spotify_url
 from services.apple_music_downloader import AppleMusicDownloader, AppleMusicError, parse_apple_url
 from services.sources import detect_source
+from services.spotify_canvas import canvas_to_gif
 from services.file_manager import FileManager
 from services.recognizer import AudioRecognizer
 from config import Config
@@ -654,7 +655,10 @@ async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         if audio_file:
             # В подписи называется реальный источник: файл пришёл не со Spotify
             source = downloader.last_source or "YouTube"
-            await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url, source)
+            await process_and_send_audio(
+                update, context, sent_message, audio_file, cover_file, url, source,
+                canvas_file=downloader.last_canvas,
+            )
         else:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
@@ -724,6 +728,7 @@ async def _download_spotify_album(update: Update, context: ContextTypes.DEFAULT_
             await process_and_send_audio(
                 update, context, sent_message, audio_file, cover_file, url,
                 downloader.last_source or "Spotify", keep_status_message=True,
+                canvas_file=downloader.last_canvas,
             )
             sent_count += 1
     except SpotifyError as e:
@@ -780,8 +785,9 @@ async def _download_track_list(update, context, url, title, tracks, fetch_track,
     Скачивает и отправляет все треки списка по очереди.
 
     fetch_track — корутина, принимающая трек и возвращающая (аудио, обложка,
-    источник). Одно сервисное сообщение переиспользуется под прогресс: иначе
-    на плейлист из полусотни треков в чат сыпались бы десятки служебных строк.
+    источник, canvas). Canvas может быть None. Одно сервисное сообщение
+    переиспользуется под прогресс: иначе на плейлист из полусотни треков
+    в чат сыпались бы десятки служебных строк.
     """
     target_update = update.callback_query if update.callback_query else update
     chat_id = target_update.message.chat_id
@@ -803,7 +809,7 @@ async def _download_track_list(update, context, url, title, tracks, fetch_track,
             )
 
             try:
-                audio_file, cover_file, track_source = await fetch_track(track)
+                audio_file, cover_file, track_source, canvas_file = await fetch_track(track)
             except Exception as e:
                 # Один недоступный трек не должен ронять весь плейлист
                 logger.warning(f"⚠️ {label}: трек «{track['title']}» не скачался: {e}")
@@ -816,6 +822,7 @@ async def _download_track_list(update, context, url, title, tracks, fetch_track,
             await process_and_send_audio(
                 update, context, sent_message, audio_file, cover_file, url,
                 track_source or label, keep_status_message=True,
+                canvas_file=canvas_file,
             )
             sent_count += 1
     finally:
@@ -871,7 +878,7 @@ async def _download_spotify_playlist(update: Update, context: ContextTypes.DEFAU
 
     async def fetch(track):
         audio_file, cover_file = await downloader.download_track_by_id(track["id"])
-        return audio_file, cover_file, downloader.last_source
+        return audio_file, cover_file, downloader.last_source, downloader.last_canvas
 
     await _download_track_list(update, context, url, info["title"], info["tracks"], fetch, "Spotify")
 
@@ -888,15 +895,16 @@ async def _download_apple_playlist(update: Update, context: ContextTypes.DEFAULT
 
     async def fetch(track):
         audio_file, cover_file = await downloader.download_track(track["url"])
-        return audio_file, cover_file, "Apple Music"
+        return audio_file, cover_file, "Apple Music", None
 
     await _download_track_list(update, context, url, info["title"], info["tracks"], fetch, "Apple Music")
 
 
-async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, sent_message, initial_audio_file: Path, initial_cover_file: Optional[Path], url_for_caption: str, source: str, keep_status_message: bool = False):
+async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, sent_message, initial_audio_file: Path, initial_cover_file: Optional[Path], url_for_caption: str, source: str, keep_status_message: bool = False, canvas_file: Optional[Path] = None):
     file_manager = FileManager()
     files_to_delete = {initial_audio_file}
     if initial_cover_file: files_to_delete.add(initial_cover_file)
+    if canvas_file: files_to_delete.add(canvas_file)
     target_update = update.callback_query if update.callback_query else update
     chat_id = target_update.message.chat_id
 
@@ -965,7 +973,31 @@ async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_T
                 parse_mode='Markdown'
             )
 
-        # 2. ОТПРАВЛЯЕМ АУДИОФАЙЛ
+        # 2. ОТПРАВЛЯЕМ CANVAS (GIF) — мини-видео Spotify поверх обложки
+        if canvas_file and canvas_file.exists():
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=sent_message.message_id,
+                    text="🎬 Конвертирую Spotify Canvas в GIF...",
+                )
+            except Exception:
+                pass
+
+            gif_file = await canvas_to_gif(canvas_file)
+            if gif_file:
+                files_to_delete.add(gif_file)
+            # Если GIF не получился, отправляем исходный mp4: Telegram
+            # проигрывает его так же, как анимацию.
+            animation_path = gif_file or canvas_file
+            try:
+                with open(animation_path, "rb") as animation:
+                    await context.bot.send_animation(chat_id=chat_id, animation=animation)
+            except Exception as e:
+                # Canvas — украшение: его сбой не должен мешать отправить песню
+                logger.warning(f"⚠️ Не удалось отправить Spotify Canvas: {e}")
+
+        # 3. ОТПРАВЛЯЕМ АУДИОФАЙЛ
         with open(audio_file_to_send, 'rb') as f:
             await context.bot.send_audio(
                 chat_id=chat_id, 
