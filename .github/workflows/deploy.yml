@@ -63,6 +63,15 @@ jobs:
               echo "⚠️ cookies.txt для Apple Music не найден — бот попросит его при первой загрузке."
             fi
 
+            # Spotify Canvas: cookies sp_dc/sp_key в git не попадают. Секрет
+            # SPOTIFY_COOKIES_B64 — это base64 от Netscape-файла. Если файл уже
+            # лежит на сервере (например, обновлён вручную), не трогаем его.
+            if [ ! -f spotify-cookies.txt ] && [ -n "${{ secrets.SPOTIFY_COOKIES_B64 }}" ]; then
+              echo "🍪 Создаю spotify-cookies.txt из секрета..."
+              echo "${{ secrets.SPOTIFY_COOKIES_B64 }}" | base64 -d > spotify-cookies.txt
+              chmod 600 spotify-cookies.txt
+            fi
+
             if [ ! -f spotify-cookies.txt ]; then
               echo "⚠️ spotify-cookies.txt не найден — Canvas к песням Spotify добавляться не будет."
             fi

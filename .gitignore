@@ -42,3 +42,5 @@ bot.log
 # собранные артефакты
 *.whl
 repomix-output.xml
+# служебные файлы Playwright MCP
+.playwright-mcp/
