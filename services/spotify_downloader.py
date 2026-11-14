@@ -16,6 +16,7 @@ import logging
 import asyncio
 import re
 import shutil
+import unicodedata
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,171 @@ class SpotifyDownloader:
             "year": ((track.get("album") or {}).get("release_date") or "")[:4],
             "cover_url": images[0]["url"] if images else None,
         }
+
+    # --- поиск трека по метаданным (для Canvas из Qobuz) ---
+
+    @staticmethod
+    def _normalize_match_text(value) -> str:
+        """
+        Нормализует название/артиста для сравнения: убирает регистр, диакритику,
+        скобки с версиями и «feat.», оставляя только слова.
+        """
+        text = unicodedata.normalize("NFKD", str(value or ""))
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        text = text.casefold()
+        text = re.sub(r"[\(\[].*?[\)\]]", " ", text)
+        text = re.sub(r"\b(?:feat|ft|featuring)\.?\s+.*$", " ", text)
+        text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def _title_matches(cls, wanted_title: str, candidate_title: str) -> bool:
+        """Сравнивает названия, разрешая только варианты вроде «Remastered»."""
+        if not wanted_title or not candidate_title:
+            return False
+        if wanted_title == candidate_title:
+            return True
+
+        version_words = {
+            "remaster", "remastered", "version", "edit", "mix", "live", "mono",
+            "stereo", "radio", "deluxe", "bonus", "explicit", "clean", "demo",
+            "acoustic", "instrumental", "extended", "original", "single",
+        }
+
+        for shorter, longer in ((wanted_title, candidate_title), (candidate_title, wanted_title)):
+            if shorter not in longer:
+                continue
+            extras = longer.replace(shorter, " ", 1).split()
+            if all(
+                word in version_words or (word.isdigit() and len(word) == 4)
+                for word in extras
+            ):
+                return True
+        return False
+
+    @classmethod
+    def _artist_matches(cls, artist: str, item: dict) -> bool:
+        """Сравнивает артиста с учётом нескольких исполнителей в метаданных."""
+        wanted_full = cls._normalize_match_text(artist)
+        candidates = [
+            cls._normalize_match_text(a.get("name"))
+            for a in item.get("artists", [])
+        ]
+        candidates = [c for c in candidates if c]
+        if not wanted_full or not candidates:
+            return False
+        if wanted_full in candidates:
+            return True
+        if len(wanted_full.split()) >= 2 and any(
+            wanted_full in c or c in wanted_full for c in candidates
+        ):
+            return True
+
+        # Qobuz часто пишет «A, B» или «A feat. B», а Spotify хранит их отдельно
+        parts = [
+            cls._normalize_match_text(p)
+            for p in re.split(
+                r"\s*(?:,|&|/|\bfeat\.?\b|\bft\.?\b|\bwith\b)\s*", artist, flags=re.I
+            )
+        ]
+        return any(part and part in candidates for part in parts)
+
+    @classmethod
+    def _track_matches(cls, item: dict, artist: str, title: str, duration=None) -> bool:
+        """Проверяет, что результат поиска Spotify — действительно нужный трек."""
+        if not cls._title_matches(
+            cls._normalize_match_text(title),
+            cls._normalize_match_text(item.get("name")),
+        ):
+            return False
+
+        if duration is not None:
+            try:
+                candidate_duration = float(item.get("duration_ms") or 0) / 1000
+                if candidate_duration and abs(float(duration) - candidate_duration) > 10:
+                    return False
+            except (TypeError, ValueError):
+                pass
+
+        return cls._artist_matches(artist, item)
+
+    def search_track_id(
+        self, artist: str, title: str, isrc: Optional[str] = None, duration=None
+    ) -> Optional[str]:
+        """
+        Ищет трек в Spotify по ISRC, затем по артисту и названию.
+
+        ISRC — самый надёжный путь: Qobuz отдаёт его в метаданных трека.
+        """
+        try:
+            client = self._client()
+        except Exception as e:
+            logger.warning(f"⚠️ Spotify Canvas: клиент недоступен: {e}")
+            return None
+
+        clean_isrc = re.sub(r"[^A-Za-z0-9]", "", str(isrc or "")).upper()
+        if clean_isrc:
+            try:
+                result = client.search(q=f"isrc:{clean_isrc}", type="track", limit=5)
+                items = (result.get("tracks") or {}).get("items", [])
+                for item in items:
+                    item_isrc = re.sub(
+                        r"[^A-Za-z0-9]", "",
+                        str((item.get("external_ids") or {}).get("isrc") or ""),
+                    ).upper()
+                    if item_isrc == clean_isrc and item.get("id"):
+                        logger.info(f"🔎 Spotify Canvas: найден по ISRC {clean_isrc}")
+                        return item["id"]
+                # Некоторые ответы Web API не содержат external_ids — тогда
+                # доверяем самому ISRC-запросу, он возвращает только совпадения.
+                if items and not any(item.get("external_ids") for item in items):
+                    track_id = items[0].get("id")
+                    if track_id:
+                        logger.info(f"🔎 Spotify Canvas: найден по ISRC {clean_isrc}")
+                        return track_id
+            except Exception as e:
+                logger.warning(f"⚠️ Spotify Canvas: поиск по ISRC не удался: {e}")
+
+        clean_artist = re.sub(r'["\\]', " ", str(artist or "")).strip()
+        clean_title = re.sub(r'["\\]', " ", str(title or "")).strip()
+        if not clean_artist or not clean_title:
+            return None
+
+        queries = [
+            f'artist:"{clean_artist}" track:"{clean_title}"',
+            f"{clean_artist} {clean_title}",
+        ]
+        seen = set()
+        for query in queries:
+            try:
+                result = client.search(q=query, type="track", limit=10)
+            except Exception as e:
+                logger.warning(f"⚠️ Spotify Canvas: поиск «{query}» не удался: {e}")
+                continue
+
+            for item in (result.get("tracks") or {}).get("items", []):
+                track_id = item.get("id")
+                if not track_id or track_id in seen:
+                    continue
+                seen.add(track_id)
+                if self._track_matches(item, artist, title, duration):
+                    logger.info(f"🔎 Spotify Canvas: найден по названию — {track_id}")
+                    return track_id
+
+        return None
+
+    async def download_canvas_for(
+        self, artist: str, title: str, isrc: Optional[str] = None, duration=None
+    ) -> Optional[Path]:
+        """Находит трек в Spotify и скачивает его Canvas (необязательный бонус)."""
+        track_id = await asyncio.to_thread(
+            self.search_track_id, artist, title, isrc, duration
+        )
+        if not track_id:
+            logger.info(f"ℹ️ Spotify Canvas: «{artist} — {title}» в Spotify не найден")
+            return None
+        logger.info(f"🎬 Spotify Canvas: для «{artist} — {title}» взят трек {track_id}")
+        return await self._download_canvas(track_id)
 
     # --- альбомы ---
 

@@ -124,6 +124,54 @@ class QobuzDownloader:
         ]
         return await self._run_rip(command, progress_callback)
 
+    async def get_track_info(
+        self, url: str, track_index: Optional[int] = None
+    ) -> Optional[Dict]:
+        """
+        Метаданные конкретного трека Qobuz: артист, название, ISRC, длительность.
+
+        Нужны, чтобы найти этот же трек в Spotify и скачать его Canvas.
+        Для ссылки на альбом берётся трек по track_index (нумерация с 1).
+        """
+        track_id = self._extract_id(url)
+        if not track_id:
+            return None
+
+        if "/album/" in url:
+            album_info = await self.get_album_info(url)
+            index = track_index or 1
+            if not album_info or not 1 <= index <= len(album_info["tracks"]):
+                return None
+            track_id = album_info["tracks"][index - 1]["id"]
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(
+                    f"{QOBUZ_API}/track/get",
+                    params={"track_id": track_id, "app_id": Config.QOBUZ_APP_ID},
+                    headers=self._headers,
+                )
+                if r.status_code != 200:
+                    logger.warning(f"⚠️ Track API вернул {r.status_code}")
+                    return None
+                data = r.json()
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось получить метаданные трека Qobuz: {e}")
+            return None
+
+        artist = (data.get("performer") or {}).get("name")
+        if not artist:
+            artist = ((data.get("album") or {}).get("artist") or {}).get("name")
+        if not data.get("title") or not artist:
+            return None
+
+        return {
+            "title": data["title"],
+            "artist": artist,
+            "isrc": data.get("isrc"),
+            "duration": data.get("duration"),
+        }
+
     def _extract_id(self, url: str) -> Optional[str]:
         m = re.search(r'/(?:album|track)/(\w+)', url)
         return m.group(1) if m else None

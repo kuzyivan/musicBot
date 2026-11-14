@@ -444,6 +444,46 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await _download_qobuz(update, context, url, track_index=track_index)
 
 
+async def _find_qobuz_canvas(downloader, url: str, track_index: Optional[int], audio_file: Path) -> Optional[Path]:
+    """
+    Ищет Canvas для трека, скачанного с Qobuz.
+
+    У Qobuz нет Canvas, поэтому трек ищется в Spotify: сначала по ISRC из
+    метаданных Qobuz, затем по артисту и названию. Для альбома без выбранного
+    трека берутся теги реально скачанного файла — иначе Canvas мог бы
+    относиться к другой песне.
+    """
+    if not all((Config.SPOTIPY_CLIENT_ID, Config.SPOTIPY_CLIENT_SECRET)):
+        return None
+
+    try:
+        meta = None
+        if "/track/" in url or track_index is not None:
+            meta = await downloader.get_track_info(url, track_index)
+
+        if not meta:
+            tags = _get_metadata_from_file(audio_file)
+            meta = {
+                "title": tags.get("title"),
+                "artist": tags.get("artist"),
+                "isrc": tags.get("isrc"),
+                "duration": None,
+            }
+
+        title, artist = meta.get("title"), meta.get("artist")
+        if not title or not artist or title in ("N/A", "Unknown") or artist in ("N/A", "Unknown"):
+            return None
+
+        spotify = SpotifyDownloader()
+        return await spotify.download_canvas_for(
+            artist, title, meta.get("isrc"), meta.get("duration")
+        )
+    except Exception as e:
+        # Canvas не должен мешать скачиванию музыки
+        logger.warning(f"⚠️ Qobuz: Canvas не получен: {e}")
+        return None
+
+
 async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, track_index: Optional[int] = None):
     downloader = QobuzDownloader()
     file_manager = FileManager()
@@ -461,7 +501,16 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
 
             audio_file, cover_file = await downloader.download_track(url, quality_id, track_index=track_index)
             if audio_file:
-                await process_and_send_audio(update, context, sent_message, audio_file, cover_file, url, "Qobuz")
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=sent_message.message_id,
+                    text=f"{base_text}🎬 Ищу Canvas в Spotify...",
+                )
+                canvas_file = await _find_qobuz_canvas(downloader, url, track_index, audio_file)
+                await process_and_send_audio(
+                    update, context, sent_message, audio_file, cover_file, url, "Qobuz",
+                    canvas_file=canvas_file,
+                )
                 return
         await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="❌ Qobuz: Не удалось скачать файл.")
     except QobuzAuthError:
@@ -1031,6 +1080,10 @@ def _get_metadata_from_file(file_path: Path) -> dict:
         details['album'] = audio.get('album', ['N/A'])[0]
         year = audio.get('date', []) or audio.get('TDRC', []) or ['N/A']
         details['year'] = re.sub(r'[^0-9]', '', str(year[0]))[:4] or 'N/A'
+        isrc = audio.get('isrc', []) or audio.get('ISRC', [])
+        if isinstance(isrc, (list, tuple)):
+            isrc = isrc[0] if isrc else None
+        details['isrc'] = re.sub(r'[^A-Za-z0-9]', '', str(isrc)).upper() if isrc else None
         return details
     except Exception: return {}
 
