@@ -61,6 +61,9 @@ class SpotifyDownloader:
         # Короткое вертикальное видео Canvas (mp4), если оно есть у трека.
         # Необязательный бонус: без cookie или при сбое остаётся None.
         self.last_canvas: Optional[Path] = None
+        # Ссылки на найденный трек и его альбом в Spotify — для подписи.
+        self.last_spotify_url: Optional[str] = None
+        self.last_spotify_album_url: Optional[str] = None
         self._canvas: Optional["SpotifyCanvasDownloader"] = None
         # Одна неудача отключает Canvas до конца текущего альбома/плейлиста:
         # иначе протухший sp_dc означал бы полсотни запросов к token endpoint.
@@ -104,12 +107,22 @@ class SpotifyDownloader:
             raise SpotifyError("❌ Spotify: трек не найден — возможно, ссылка устарела.")
 
         images = (track.get("album") or {}).get("images") or []
+        album = track.get("album") or {}
+        album_id = album.get("id")
         return {
             "title": track["name"],
             "artist": ", ".join(a["name"] for a in track.get("artists", [])),
-            "album": (track.get("album") or {}).get("name", ""),
-            "year": ((track.get("album") or {}).get("release_date") or "")[:4],
+            "album": album.get("name", ""),
+            "year": (album.get("release_date") or "")[:4],
             "cover_url": images[0]["url"] if images else None,
+            "spotify_url": (
+                (track.get("external_urls") or {}).get("spotify")
+                or (f"https://open.spotify.com/track/{track['id']}" if track.get("id") else None)
+            ),
+            "spotify_album_url": (
+                (album.get("external_urls") or {}).get("spotify")
+                or (f"https://open.spotify.com/album/{album_id}" if album_id else None)
+            ),
         }
 
     # --- поиск трека по метаданным (для Canvas из Qobuz) ---
@@ -199,6 +212,20 @@ class SpotifyDownloader:
 
         return cls._artist_matches(artist, item)
 
+    def _remember_spotify_links(self, item: dict):
+        """Запоминает ссылки найденного трека и его альбома для подписи."""
+        track_id = item.get("id")
+        album = item.get("album") or {}
+        album_id = album.get("id")
+        self.last_spotify_url = (
+            (item.get("external_urls") or {}).get("spotify")
+            or (f"https://open.spotify.com/track/{track_id}" if track_id else None)
+        )
+        self.last_spotify_album_url = (
+            (album.get("external_urls") or {}).get("spotify")
+            or (f"https://open.spotify.com/album/{album_id}" if album_id else None)
+        )
+
     def search_track_id(
         self, artist: str, title: str, isrc: Optional[str] = None, duration=None
     ) -> Optional[str]:
@@ -207,6 +234,8 @@ class SpotifyDownloader:
 
         ISRC — самый надёжный путь: Qobuz отдаёт его в метаданных трека.
         """
+        self.last_spotify_url = None
+        self.last_spotify_album_url = None
         try:
             client = self._client()
         except Exception as e:
@@ -225,6 +254,7 @@ class SpotifyDownloader:
                     ).upper()
                     if item_isrc == clean_isrc and item.get("id"):
                         logger.info(f"🔎 Spotify Canvas: найден по ISRC {clean_isrc}")
+                        self._remember_spotify_links(item)
                         return item["id"]
                 # Некоторые ответы Web API не содержат external_ids — тогда
                 # доверяем самому ISRC-запросу, он возвращает только совпадения.
@@ -232,6 +262,7 @@ class SpotifyDownloader:
                     track_id = items[0].get("id")
                     if track_id:
                         logger.info(f"🔎 Spotify Canvas: найден по ISRC {clean_isrc}")
+                        self._remember_spotify_links(items[0])
                         return track_id
             except Exception as e:
                 logger.warning(f"⚠️ Spotify Canvas: поиск по ISRC не удался: {e}")
@@ -260,6 +291,7 @@ class SpotifyDownloader:
                 seen.add(track_id)
                 if self._track_matches(item, artist, title, duration):
                     logger.info(f"🔎 Spotify Canvas: найден по названию — {track_id}")
+                    self._remember_spotify_links(item)
                     return track_id
 
         return None
@@ -368,7 +400,11 @@ class SpotifyDownloader:
     async def download_track_by_id(self, track_id: str) -> Tuple[Optional[Path], Optional[Path]]:
         """Скачивает трек по его Spotify ID."""
         self.last_canvas = None
+        self.last_spotify_url = None
+        self.last_spotify_album_url = None
         meta = self._get_track_metadata(track_id)
+        self.last_spotify_url = meta.get("spotify_url")
+        self.last_spotify_album_url = meta.get("spotify_album_url")
         logger.info(f"🎧 Spotify: {meta['artist']} — {meta['title']}")
         self._clear_temp_dir()
 

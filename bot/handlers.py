@@ -444,9 +444,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await _download_qobuz(update, context, url, track_index=track_index)
 
 
-async def _find_qobuz_canvas(downloader, url: str, track_index: Optional[int], audio_file: Path) -> Optional[Path]:
+async def _find_qobuz_spotify(downloader, url: str, track_index: Optional[int], audio_file: Path) -> Tuple[Optional[Path], Optional[str], Optional[str]]:
     """
-    Ищет Canvas для трека, скачанного с Qobuz.
+    Ищет трек Qobuz в Spotify: Canvas и ссылки на песню/альбом для подписи.
 
     У Qobuz нет Canvas, поэтому трек ищется в Spotify: сначала по ISRC из
     метаданных Qobuz, затем по артисту и названию. Для альбома без выбранного
@@ -454,7 +454,7 @@ async def _find_qobuz_canvas(downloader, url: str, track_index: Optional[int], a
     относиться к другой песне.
     """
     if not all((Config.SPOTIPY_CLIENT_ID, Config.SPOTIPY_CLIENT_SECRET)):
-        return None
+        return None, None, None
 
     try:
         meta = None
@@ -472,16 +472,17 @@ async def _find_qobuz_canvas(downloader, url: str, track_index: Optional[int], a
 
         title, artist = meta.get("title"), meta.get("artist")
         if not title or not artist or title in ("N/A", "Unknown") or artist in ("N/A", "Unknown"):
-            return None
+            return None, None, None
 
         spotify = SpotifyDownloader()
-        return await spotify.download_canvas_for(
+        canvas_file = await spotify.download_canvas_for(
             artist, title, meta.get("isrc"), meta.get("duration")
         )
+        return canvas_file, spotify.last_spotify_url, spotify.last_spotify_album_url
     except Exception as e:
-        # Canvas не должен мешать скачиванию музыки
-        logger.warning(f"⚠️ Qobuz: Canvas не получен: {e}")
-        return None
+        # Canvas и ссылки не должны мешать скачиванию музыки
+        logger.warning(f"⚠️ Qobuz: Spotify-данные не получены: {e}")
+        return None, None, None
 
 
 async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, track_index: Optional[int] = None):
@@ -506,10 +507,14 @@ async def _download_qobuz(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
                     message_id=sent_message.message_id,
                     text=f"{base_text}🎬 Ищу Canvas в Spotify...",
                 )
-                canvas_file = await _find_qobuz_canvas(downloader, url, track_index, audio_file)
+                canvas_file, spotify_url, spotify_album_url = await _find_qobuz_spotify(
+                    downloader, url, track_index, audio_file
+                )
                 await process_and_send_audio(
                     update, context, sent_message, audio_file, cover_file, url, "Qobuz",
                     canvas_file=canvas_file,
+                    spotify_url=spotify_url,
+                    spotify_album_url=spotify_album_url,
                 )
                 return
         await context.bot.edit_message_text(chat_id=chat_id, message_id=sent_message.message_id, text="❌ Qobuz: Не удалось скачать файл.")
@@ -707,6 +712,8 @@ async def _download_spotify(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             await process_and_send_audio(
                 update, context, sent_message, audio_file, cover_file, url, source,
                 canvas_file=downloader.last_canvas,
+                spotify_url=downloader.last_spotify_url,
+                spotify_album_url=downloader.last_spotify_album_url,
             )
         else:
             await context.bot.edit_message_text(
@@ -778,6 +785,8 @@ async def _download_spotify_album(update: Update, context: ContextTypes.DEFAULT_
                 update, context, sent_message, audio_file, cover_file, url,
                 downloader.last_source or "Spotify", keep_status_message=True,
                 canvas_file=downloader.last_canvas,
+                spotify_url=downloader.last_spotify_url,
+                spotify_album_url=downloader.last_spotify_album_url,
             )
             sent_count += 1
     except SpotifyError as e:
@@ -858,7 +867,10 @@ async def _download_track_list(update, context, url, title, tracks, fetch_track,
             )
 
             try:
-                audio_file, cover_file, track_source, canvas_file = await fetch_track(track)
+                (
+                    audio_file, cover_file, track_source, canvas_file,
+                    spotify_url, spotify_album_url,
+                ) = await fetch_track(track)
             except Exception as e:
                 # Один недоступный трек не должен ронять весь плейлист
                 logger.warning(f"⚠️ {label}: трек «{track['title']}» не скачался: {e}")
@@ -872,6 +884,8 @@ async def _download_track_list(update, context, url, title, tracks, fetch_track,
                 update, context, sent_message, audio_file, cover_file, url,
                 track_source or label, keep_status_message=True,
                 canvas_file=canvas_file,
+                spotify_url=spotify_url,
+                spotify_album_url=spotify_album_url,
             )
             sent_count += 1
     finally:
@@ -927,7 +941,10 @@ async def _download_spotify_playlist(update: Update, context: ContextTypes.DEFAU
 
     async def fetch(track):
         audio_file, cover_file = await downloader.download_track_by_id(track["id"])
-        return audio_file, cover_file, downloader.last_source, downloader.last_canvas
+        return (
+            audio_file, cover_file, downloader.last_source, downloader.last_canvas,
+            downloader.last_spotify_url, downloader.last_spotify_album_url,
+        )
 
     await _download_track_list(update, context, url, info["title"], info["tracks"], fetch, "Spotify")
 
@@ -944,12 +961,12 @@ async def _download_apple_playlist(update: Update, context: ContextTypes.DEFAULT
 
     async def fetch(track):
         audio_file, cover_file = await downloader.download_track(track["url"])
-        return audio_file, cover_file, "Apple Music", None
+        return audio_file, cover_file, "Apple Music", None, None, None
 
     await _download_track_list(update, context, url, info["title"], info["tracks"], fetch, "Apple Music")
 
 
-async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, sent_message, initial_audio_file: Path, initial_cover_file: Optional[Path], url_for_caption: str, source: str, keep_status_message: bool = False, canvas_file: Optional[Path] = None):
+async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, sent_message, initial_audio_file: Path, initial_cover_file: Optional[Path], url_for_caption: str, source: str, keep_status_message: bool = False, canvas_file: Optional[Path] = None, spotify_url: Optional[str] = None, spotify_album_url: Optional[str] = None):
     file_manager = FileManager()
     files_to_delete = {initial_audio_file}
     if initial_cover_file: files_to_delete.add(initial_cover_file)
@@ -992,7 +1009,11 @@ async def process_and_send_audio(update: Update, context: ContextTypes.DEFAULT_T
             real_quality = _apple_quality_label(audio_file_to_send) or real_quality
         custom_filename = f"{track_details.get('artist', 'Unknown')} - {track_details.get('title', 'Unknown')}{audio_file_to_send.suffix}"
 
-        caption_text = _build_caption(track_details, real_quality, source, url_for_caption)
+        caption_text = _build_caption(
+            track_details, real_quality, source, url_for_caption,
+            spotify_url=spotify_url,
+            spotify_album_url=spotify_album_url,
+        )
 
         # 1. ОТПРАВЛЯЕМ ОБЛОЖКУ С КРАСИВОЙ ПОДПИСЬЮ
         if initial_cover_file and initial_cover_file.exists():
@@ -1088,7 +1109,7 @@ def _get_metadata_from_file(file_path: Path) -> dict:
     except Exception: return {}
 
 
-def _build_caption(track_details: dict, quality: str, source: str, url: str) -> str:
+def _build_caption(track_details: dict, quality: str, source: str, url: str, spotify_url: Optional[str] = None, spotify_album_url: Optional[str] = None) -> str:
     """
     Собирает лаконичную подпись без эмодзи:
 
@@ -1097,6 +1118,7 @@ def _build_caption(track_details: dict, quality: str, source: str, url: str) -> 
 
         Альбом · Год
         Качество · Источник
+        Spotify: трек · альбом
 
     Пустые поля и заглушки прошлых версий ('N/A', 'Unknown') опускаются,
     а все подставляемые значения экранируются — иначе символы вроде '_'
@@ -1121,6 +1143,16 @@ def _build_caption(track_details: dict, quality: str, source: str, url: str) -> 
     safe_url = str(url).replace(")", "\\)")
     quality_line.append(f"[{_md_escape(source)}]({safe_url})")
     caption += "\n" + " · ".join(quality_line)
+
+    spotify_links = []
+    if spotify_url:
+        safe_spotify_url = str(spotify_url).replace(")", "\\)")
+        spotify_links.append(f"[трек]({safe_spotify_url})")
+    if spotify_album_url:
+        safe_album_url = str(spotify_album_url).replace(")", "\\)")
+        spotify_links.append(f"[альбом]({safe_album_url})")
+    if spotify_links:
+        caption += "\nSpotify: " + " · ".join(spotify_links)
 
     return caption
 
